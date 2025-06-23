@@ -276,14 +276,12 @@ class TradingEngine:
         # Check if we're in buffer periods and skip processing
         market_open_time = datetime.datetime.strptime(self.market_open, '%H:%M').time()
         market_open_datetime = datetime.datetime.combine(current_time.date(), market_open_time)
-        # Patch: make market_open_datetime timezone-aware if current_time is
         if current_time.tzinfo is not None and market_open_datetime.tzinfo is None:
             market_open_datetime = market_open_datetime.replace(tzinfo=current_time.tzinfo)
         time_since_open = (current_time - market_open_datetime).total_seconds() / 60
         
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
-        # Patch: make market_close_datetime timezone-aware if current_time is
         if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
             market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
@@ -555,6 +553,8 @@ class TradingEngine:
         # Check if enough time has passed since market open (15-minute buffer)
         market_open_time = datetime.datetime.strptime(self.market_open, '%H:%M').time()
         market_open_datetime = datetime.datetime.combine(current_time.date(), market_open_time)
+        if current_time.tzinfo is not None and market_open_datetime.tzinfo is None:
+            market_open_datetime = market_open_datetime.replace(tzinfo=current_time.tzinfo)
         time_since_open = (current_time - market_open_datetime).total_seconds() / 60
         
         if time_since_open < self.market_open_buffer_minutes:
@@ -578,6 +578,8 @@ class TradingEngine:
         # Check if we're too close to market close (15-minute buffer)
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
+        if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
+            market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
         if time_until_close < self.market_close_buffer_minutes:
@@ -821,6 +823,8 @@ class TradingEngine:
         # Check market close buffer exit (force exit 15 minutes before close)
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
+        if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
+            market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
         if time_until_close < self.market_close_buffer_minutes:
@@ -920,10 +924,14 @@ class TradingEngine:
         current_time = result['timestamp']
         market_open_time = datetime.datetime.strptime(self.market_open, '%H:%M').time()
         market_open_datetime = datetime.datetime.combine(current_time.date(), market_open_time)
+        if current_time.tzinfo is not None and market_open_datetime.tzinfo is None:
+            market_open_datetime = market_open_datetime.replace(tzinfo=current_time.tzinfo)
         time_since_open = (current_time - market_open_datetime).total_seconds() / 60
         
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
+        if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
+            market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
         # Build detailed log message
@@ -1041,10 +1049,14 @@ class TradingEngine:
         """Get current market timing status for debugging"""
         market_open_time = datetime.datetime.strptime(self.market_open, '%H:%M').time()
         market_open_datetime = datetime.datetime.combine(current_time.date(), market_open_time)
+        if current_time.tzinfo is not None and market_open_datetime.tzinfo is None:
+            market_open_datetime = market_open_datetime.replace(tzinfo=current_time.tzinfo)
         time_since_open = (current_time - market_open_datetime).total_seconds() / 60
         
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
+        if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
+            market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
         early_signal_cooldown_remaining = 0
