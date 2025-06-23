@@ -73,13 +73,15 @@ For large historical datasets, the bot automatically converts CSV files to Parqu
 
 ```
 bot/
-├── backtest.py              # Backtesting entry point
 ├── live.py                  # Live trading entry point  
 ├── paper.py                 # Paper trading entry point
+├── backtest_batch.py        # Batch backtesting & analytics engine (finds top configs)
+├── backtest_single.py       # Single backtest runner (used by batch engine)
 ├── requirements.txt         # Python dependencies
 ├── config/                  # Configuration files
 │   ├── strategy.py          # Core strategy parameters
-│   ├── backtest.py          # Backtest-specific settings
+│   ├── backtest_batch.py    # Batch backtest specific settings
+│   ├── backtest_single.py   # Single backtest specific settings
 │   ├── live.py              # Live trading settings
 │   └── paper.py             # Paper trading settings
 ├── core/                    # Core trading logic
@@ -90,8 +92,6 @@ bot/
 │   ├── spy/                 # SPY price data
 │   └── options_greeks/      # Options data with Greeks
 └── logs/                    # Performance logs and output
-├── backtest_batch.py         # Batch backtesting & analytics engine (finds top configs)
-├── backtest_single.py        # Single backtest runner (used by batch engine)
 ```
 
 ## Configuration
