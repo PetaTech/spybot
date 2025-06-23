@@ -65,8 +65,24 @@ class BacktestDataProvider(DataProvider):
         for idx, row in enumerate(self.spy_stream):
             if idx % 100 == 0:
                 print(f"[DEBUG] Processing SPY row {idx}: {row.quote_datetime}")
+            # Ensure current_time is always a datetime object
+            current_time = row.quote_datetime
+            if isinstance(current_time, str):
+                try:
+                    # Try parsing common formats
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M"):
+                        try:
+                            current_time = datetime.datetime.strptime(current_time, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        raise ValueError(f"Unrecognized datetime format: {row.quote_datetime}")
+                except Exception as e:
+                    print(f"[DEBUG] Failed to parse quote_datetime: {row.quote_datetime}, error: {e}")
+                    raise
             yield {
-                'current_time': row.quote_datetime,
+                'current_time': current_time,
                 'open': row.open,
                 'high': row.high,
                 'low': row.low,
