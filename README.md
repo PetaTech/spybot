@@ -13,6 +13,8 @@ This trading bot is designed to capitalize on short-term momentum moves in SPY b
 - **Comprehensive Risk Management**: Multiple layers of protection including daily limits, stop losses, and position sizing
 - **Real-time Data Integration**: Uses Tradier API for live market data and order execution
 - **Detailed Performance Tracking**: Extensive logging and performance metrics
+- **Batch Backtesting & Analytics**: Run large-scale parameter sweeps to find the top 5 strategy configurations by win rate and profit
+- **Ultra-Fast Data Handling**: Automatically converts CSVs to Parquet using DuckDB for high-speed, memory-efficient historical data queries
 
 ## How It Works
 
@@ -26,6 +28,16 @@ The bot operates on a continuous data stream workflow:
 6. **Performance Tracking**: Logs all trades and calculates comprehensive metrics
 
 The engine processes one data row at a time, maintaining internal state for positions, daily limits, and market timing rules.
+
+## Data Handling & Performance
+
+### Parquet Conversion for Fast Backtesting
+For large historical datasets, the bot automatically converts CSV files to Parquet format using DuckDB. This enables extremely fast, memory-efficient queries—critical for running thousands of backtests or analytics sweeps. You do not need to manually convert files; the system handles it on first run.
+
+**Benefits:**
+- No need to load entire CSVs into memory
+- Orders-of-magnitude faster queries for large datasets
+- Seamless integration: just place your CSVs in the `data/` directory
 
 ## Trading Strategy
 
@@ -78,6 +90,8 @@ bot/
 │   ├── spy/                 # SPY price data
 │   └── options_greeks/      # Options data with Greeks
 └── logs/                    # Performance logs and output
+├── backtest_batch.py         # Batch backtesting & analytics engine (finds top configs)
+├── backtest_single.py        # Single backtest runner (used by batch engine)
 ```
 
 ## Configuration
@@ -115,17 +129,69 @@ MARKET_OPEN_BUFFER_MINUTES = 15     # Wait 15 min after open
 MARKET_CLOSE_BUFFER_MINUTES = 15    # Exit 15 min before close
 ```
 
-### Backtest Configuration (`config/backtest.py`)
+### Backtest Configuration (`config/backtest_single.py`)
 
 ```python
-# Data Files
-SPY_PATH = "./data/spy/UnderlyingIntervals_60sec_2025-05-30.csv"
-OPT_PATH = "./data/options_greeks/UnderlyingOptionsIntervals_60sec_calcs_oi_2025-05-30.csv"
+# Imports core strategy parameters from config/strategy.py
+from .strategy import *
 
-# Performance Settings
-INITIAL_CAPITAL = 12000             # Starting capital
-COMMISSION_PER_CONTRACT = 0.65      # $0.65 per contract
-SLIPPAGE = 0.01                     # 1 cent slippage
+# === Data Configuration ===
+BASE_DIR = "."  # Current directory
+REPLAY_DATE = "2025-05-30"
+SPY_PATH = f"{BASE_DIR}/data/spy/UnderlyingIntervals_60sec_{REPLAY_DATE}.csv"
+OPT_PATH = f"{BASE_DIR}/data/options_greeks/UnderlyingOptionsIntervals_60sec_calcs_oi_{REPLAY_DATE}.csv"
+
+# === Backtest Specific Settings ===
+INITIAL_CAPITAL = 12000
+COMMISSION_PER_CONTRACT = 0.65  # $0.65 per contract
+SLIPPAGE = 0.01  # 1 cent slippage per option
+
+# === Backtest Performance Settings ===
+MAX_RETRIES = 6  # Same as live/paper modes
+RETRY_DELAY = 0  # No delay for faster backtesting (overrides strategy.py)
+
+# === Logging ===
+LOG_LEVEL = 'INFO'
+LOG_DIR = 'logs'
+```
+
+### Batch Optimization Configuration (`config/backtest_batch.py`)
+
+This file controls grid search, analytics, and batch backtesting. Adjust these settings to define parameter sweeps and analytics output for batch runs:
+
+```python
+# === Optimization Settings ===
+SEARCH_TYPE = "grid"  # Only grid search mode
+MAX_COMBINATIONS = 10  # Max configs to test (increase for real runs)
+SAVE_RESULTS = True
+TOP_N_RESULTS = 5
+
+# === Tunable Parameters (for grid search) ===
+TUNABLE_PARAMETERS = {
+    'MOVE_THRESHOLD_PERCENT': [0.3, 0.4],
+    'MOVE_THRESHOLD_MIN_POINTS': [3.0],
+    'MOVE_THRESHOLD_MAX_POINTS': [20.0],
+    'COOLDOWN_PERIOD': [20 * 60],
+    'RISK_PER_SIDE': [400],
+    'OPTION_TARGET_MULTIPLIER': [2.35],
+    'MIN_PROFIT_PERCENTAGE': [30.0],
+    'MAX_HOLD_SECONDS': [3600],
+    'STOP_LOSS_PERCENTAGE': [12.0],
+    'OPTION_ASK_MIN': [0.5],
+    'OPTION_ASK_MAX': [300.0],
+    'OPTION_BID_ASK_RATIO': [0.5],
+    'MAX_DAILY_TRADES': [5],
+    'MAX_DAILY_LOSS': [1000],
+    'EMERGENCY_STOP_LOSS': [2000],
+    'MARKET_OPEN_BUFFER_MINUTES': [15],
+    'MARKET_CLOSE_BUFFER_MINUTES': [15],
+    'EARLY_SIGNAL_COOLDOWN_MINUTES': [30],
+    'PRICE_WINDOW_SECONDS': [30 * 60]
+}
+
+# === Output Settings ===
+RESULTS_FILENAME = "analytics_results.csv"
+LOG_LEVEL = 'INFO'
 ```
 
 ### Live Trading Configuration (`config/live.py`)
@@ -178,13 +244,26 @@ ACCOUNT_ID = 'your_sandbox_account_id_here'
 
 Run historical backtests using stored data:
 
+- **Single Backtest**:
 ```bash
-python backtest.py
+python backtest_single.py
 ```
+- **Batch Backtest & Analytics** (find top configs):
+```bash
+python backtest_batch.py
+```
+
+The batch backtest will:
+- Run a grid/random search over strategy parameters
+- Launch multiple backtests in parallel (using all CPU cores, capped for memory safety)
+- Select and report the top 5 configurations by win rate and total profit
+- Save analytics results to CSV and a detailed log in the `logs/` directory
 
 The backtest will:
 - Load historical SPY and options data from CSV files
 - Process data row by row through the trading engine
+- Automatically convert CSVs to Parquet (if needed) for ultra-fast, memory-efficient queries using DuckDB
+- Stream historical data directly from Parquet files (never loads full files into RAM)
 - Generate comprehensive performance reports
 - Save results to the `logs/` directory
 
@@ -219,15 +298,10 @@ Live trading features:
 
 ## Backtest Results
 
-The bot generates detailed performance reports including:
-
-- **Total Return**: Overall profit/loss percentage
-- **Win Rate**: Percentage of profitable trades
-- **Average Trade**: Mean profit/loss per trade
-- **Max Drawdown**: Largest peak-to-trough decline
-- **Sharpe Ratio**: Risk-adjusted return metric
-- **Trade Distribution**: Histogram of trade outcomes
-- **Daily Performance**: Day-by-day profit/loss breakdown
+Batch analytics results include:
+- Top 5 configs by win rate and profit
+- Full CSV of all tested configs and their metrics
+- Timestamped log file with detailed analytics summary
 
 Sample metrics from recent backtests:
 - Total Return: +15.2%

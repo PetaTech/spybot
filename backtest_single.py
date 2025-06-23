@@ -10,8 +10,32 @@ from pathlib import Path
 from dateutil import tz
 from typing import Optional, Iterator, Dict
 from core.trading_engine import TradingEngine, DataProvider
-from config.backtest import *
+from config.backtest_single import *
 import duckdb
+
+
+def ensure_parquet_exists(csv_path: str) -> str:
+    """
+    Ensure a Parquet version of the given CSV exists. If not, convert it using DuckDB (no pandas in memory).
+    Returns the Parquet file path.
+    """
+    csv_path = Path(csv_path)
+    parquet_path = csv_path.with_suffix('.parquet')
+    if parquet_path.exists():
+        print(f"[PARQUET] Found existing Parquet file: {parquet_path}")
+        return str(parquet_path)
+    print(f"[PARQUET] Parquet file not found for {csv_path}. Converting CSV to Parquet using DuckDB...")
+    try:
+        # Use DuckDB to convert CSV to Parquet without loading into pandas
+        duckdb.query(f"""
+            COPY (SELECT * FROM read_csv_auto('{csv_path}', HEADER=TRUE, SAMPLE_SIZE=10000, ALL_VARCHAR=FALSE))
+            TO '{parquet_path}' (FORMAT 'parquet');
+        """)
+        print(f"[PARQUET] Converted {csv_path} to {parquet_path} successfully!")
+        return str(parquet_path)
+    except Exception as e:
+        print(f"[PARQUET] Failed to convert {csv_path} to Parquet: {e}")
+        raise
 
 
 class BacktestDataProvider(DataProvider):
@@ -20,94 +44,76 @@ class BacktestDataProvider(DataProvider):
     def __init__(self, spy_file: str, options_file: str):
         self.spy_file = spy_file
         self.options_file = options_file
-        self.spy_data = None
         self.current_index = 0
         
-        # Load SPY data (this is small enough to keep in memory)
-        self._load_spy_data()
+        # Ensure Parquet version of options file exists
+        self.options_parquet = ensure_parquet_exists(self.options_file)
+        # Ensure Parquet version of SPY file exists (for streaming)
+        self.spy_parquet = ensure_parquet_exists(self.spy_file)
+        
+        # Prepare DuckDB connection for streaming
+        self.duckdb_conn = duckdb.connect(database=':memory:')
+        self.spy_stream = self.duckdb_conn.execute(f"SELECT * FROM read_parquet('{self.spy_parquet}') ORDER BY quote_datetime ASC").fetchdf().itertuples(index=False)
+        print(f"[DEBUG] SPY Parquet streaming ready: {self.spy_parquet}")
     
     def _load_spy_data(self):
-        """Load SPY data into memory"""
-        print(f"[DEBUG] Loading SPY data from: {self.spy_file}")
-        self.spy_data = pd.read_csv(self.spy_file, parse_dates=["quote_datetime"])
-        print(f"[DEBUG] SPY data loaded, total rows: {len(self.spy_data)}")
+        pass  # No longer used
     
     def stream(self) -> Iterator[Dict]:
-        """Stream market data rows one at a time"""
-        print(f"[DEBUG] Starting data stream, total SPY rows: {len(self.spy_data)}")
-        for idx, row in self.spy_data.iterrows():
-            if idx % 100 == 0:  # Log every 100th row
-                print(f"[DEBUG] Processing SPY row {idx}/{len(self.spy_data)}: {row['quote_datetime']}")
+        """Stream market data rows one at a time using DuckDB (no pandas in memory)"""
+        print(f"[DEBUG] Starting data stream from Parquet: {self.spy_parquet}")
+        for idx, row in enumerate(self.spy_stream):
+            if idx % 100 == 0:
+                print(f"[DEBUG] Processing SPY row {idx}: {row.quote_datetime}")
             yield {
-                'current_time': row['quote_datetime'],
-                'open': row['open'],
-                'high': row['high'],
-                'low': row['low'],
-                'close': row['close'],
-                'volume': row['trade_volume'],
+                'current_time': row.quote_datetime,
+                'open': row.open,
+                'high': row.high,
+                'low': row.low,
+                'close': row.close,
+                'volume': row.trade_volume,
                 'symbol': 'SPY'
             }
     
     def set_current_time(self, current_time: datetime.datetime):
-        """Set the current time for options data loading"""
         print(f"[DEBUG] Setting current time: {current_time}")
         # No need to store this anymore since we query on demand
     
     def get_option_chain(self, symbol: str, expiration_date: str, current_time: datetime.datetime = None) -> pd.DataFrame:
-        """Get option chain for a given symbol and expiration date using DuckDB"""
         print(f"[DEBUG] get_option_chain called - symbol: {symbol}, expiration: {expiration_date}, current_time: {current_time}")
-        
         if current_time is None:
             print(f"[DEBUG] No current_time provided, cannot query options data")
             return pd.DataFrame()
-        
-        # Format the current time for the query
         time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Query by quote_datetime first (like the working example)
         query = f"""
-            SELECT * FROM read_csv_auto('{self.options_file}', header=True)
+            SELECT * FROM read_parquet('{self.options_parquet}')
             WHERE underlying_symbol = '{symbol}'
             AND quote_datetime = '{time_str}'
         """
-        
-        print(f"[DEBUG] Executing DuckDB query: {query}")
-        
+        print(f"[DEBUG] Executing DuckDB query (Parquet): {query}")
         try:
             result_df = duckdb.query(query).to_df()
             print(f"[DEBUG] DuckDB query returned {len(result_df)} rows")
-            
             if result_df.empty:
                 print(f"[DEBUG] No data returned from DuckDB query for time {time_str}")
                 return result_df
-            
-            # Filter by expiration date in Python
-            # Convert expiration date to the format used in the CSV file
             try:
                 exp_date = datetime.datetime.strptime(expiration_date, '%Y-%m-%d')
-                # Try both formats
                 exp_formats = [exp_date.strftime('%m/%d/%Y'), expiration_date]
             except:
                 exp_formats = [expiration_date]
-            
             print(f"[DEBUG] Filtering for expiration formats: {exp_formats}")
-            
-            # Filter by expiration
             mask = result_df['expiration'].isin(exp_formats)
             filtered_df = result_df[mask]
-            
             print(f"[DEBUG] After expiration filtering: {len(filtered_df)} rows")
-            
             if not filtered_df.empty:
                 print(f"[DEBUG] Option chain columns: {list(filtered_df.columns)}")
                 print(f"[DEBUG] Sample option data: {filtered_df.head(1).to_dict('records')}")
-            
             return filtered_df
-            
         except Exception as e:
             print(f"[DEBUG] DuckDB query failed: {e}")
             return pd.DataFrame()
-    
+
 
 def create_config() -> dict:
     """Create configuration for backtest mode"""
@@ -143,24 +149,41 @@ def create_config() -> dict:
     }
 
 
-def main():
-    """Main backtest function - just provides data and config to engine"""
-    print("[DEBUG] Starting backtest main function")
+def run_backtest(config: dict = None, spy_file: str = None, options_file: str = None, 
+                return_results: bool = False) -> dict:
+    """
+    Run backtest with given configuration and return results
     
-    # Get data files from config
-    spy_file = SPY_PATH
-    options_file = OPT_PATH
+    Args:
+        config: Configuration dictionary (uses create_config() if None)
+        spy_file: Path to SPY data file (uses config if None)
+        options_file: Path to options data file (uses config if None)
+        return_results: Whether to return results dict instead of just running
+        
+    Returns:
+        Results dictionary if return_results=True, None otherwise
+    """
+    print("[DEBUG] Starting backtest run")
+    
+    # Use provided config or create default
+    if config is None:
+        config = create_config()
+    
+    # Use provided files or get from config
+    if spy_file is None:
+        spy_file = config.get('SPY_PATH', SPY_PATH)
+    if options_file is None:
+        options_file = config.get('OPT_PATH', OPT_PATH)
     
     print(f"[DEBUG] SPY file path: {spy_file}")
     print(f"[DEBUG] Options file path: {options_file}")
     
-    # Create data provider and config
+    # Create data provider
     data_provider = BacktestDataProvider(spy_file, options_file)
-    config = create_config()
     
-    print(f"[DEBUG] Config created, MAX_RETRIES: {config['MAX_RETRIES']}, RETRY_DELAY: {config['RETRY_DELAY']}")
+    print(f"[DEBUG] Config created, MAX_RETRIES: {config.get('MAX_RETRIES', 'N/A')}")
     
-    # Create trading engine (engine manages orders internally)
+    # Create trading engine
     trading_engine = TradingEngine(config, data_provider, mode="backtest")
     
     # Process all data rows
@@ -206,6 +229,44 @@ def main():
     finally:
         print("[DEBUG] Finishing backtest")
         trading_engine.finish()
+        
+        # Return results if requested
+        if return_results:
+            summary = trading_engine.get_summary()
+            status = trading_engine.get_status()
+            
+            # Calculate metrics
+            total_trades = status.get('total_trades', 0)
+            winning_trades = status.get('winning_trades', 0)
+            losing_trades = status.get('losing_trades', 0)
+            total_pnl = status.get('total_pnl', 0.0)
+            
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+            max_drawdown = status.get('max_drawdown', 0.0)
+            
+            # Calculate additional metrics
+            avg_win = status.get('avg_win', 0.0)
+            avg_loss = status.get('avg_loss', 0.0)
+            profit_factor = (abs(avg_win * winning_trades) / abs(avg_loss * losing_trades)) if losing_trades > 0 and avg_loss != 0 else 0.0
+            
+            return {
+                'config': config,
+                'win_rate': win_rate,
+                'total_pnl': total_pnl,
+                'max_drawdown': max_drawdown,
+                'total_trades': total_trades,
+                'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'profit_factor': profit_factor,
+                'data_file': os.path.basename(spy_file)
+            }
+
+
+def main():
+    """Main backtest function - just provides data and config to engine"""
+    run_backtest()
 
 
 if __name__ == "__main__":

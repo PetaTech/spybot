@@ -236,8 +236,10 @@ class TradingEngine:
         current_date = current_time.strftime("%Y-%m-%d")
         current_time_str = current_time.strftime("%H-%M-%S")
         
-        # Create log file only (no CSV)
-        self.log_file = os.path.join(self.log_dir, f"{self.mode}_log_{current_date}_{current_time_str}.txt")
+        if self.mode == 'backtest':
+            self.log_file = os.path.join(self.log_dir, f"{self.mode}_single_log_{current_date}_{current_time_str}.txt")
+        else:
+            self.log_file = os.path.join(self.log_dir, f"{self.mode}_log_{current_date}_{current_time_str}.txt")
     
     def log(self, msg: str):
         """Log a message to both console and file (without timestamp)"""

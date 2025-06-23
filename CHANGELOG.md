@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.1] - Batch Backtesting & Parquet Data Upgrade - 2025
+
+### 🚀 New Features
+- **Batch Backtesting & Analytics**: Added `backtest_batch.py` to run large-scale parameter sweeps and automatically select the top 5 strategy configurations by win rate and profit.
+- **Parallel Execution**: Batch engine runs multiple backtests in parallel, with progress tracking and robust logging.
+- **Analytics Output**: Results are saved to both CSV and a detailed, timestamped log file in the `logs/` directory for later review.
+
+### ⚡ Data Handling Improvements
+- **Parquet Data Format**: All historical CSVs are now automatically converted to Parquet using DuckDB for ultra-fast, memory-efficient queries.
+- **No More Full CSV Loads**: The system streams data directly from Parquet files, never loading entire datasets into RAM, enabling efficient large-scale backtesting.
+
 ## [1.0.0] - Major Architectural Overhaul - 2025
 
 ### 🏗️ **Architecture & Design**
