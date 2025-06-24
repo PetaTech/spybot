@@ -21,9 +21,6 @@ SAFETY_ROW_LIMIT = 5000  # Reduced safety limit
 
 TUNABLE_PARAMETERS = {
     # Core strategy parameters (small sets for testing)
-    'MOVE_THRESHOLD_PERCENT': [0.3, 0.4],
-    'MOVE_THRESHOLD_MIN_POINTS': [3.0],
-    'MOVE_THRESHOLD_MAX_POINTS': [20.0],
     'COOLDOWN_PERIOD': [20 * 60],  # minutes in seconds
     'RISK_PER_SIDE': [400],
     'OPTION_TARGET_MULTIPLIER': [2.35],

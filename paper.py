@@ -61,9 +61,6 @@ class PaperDataProvider(DataProvider):
 def create_config() -> dict:
     """Create configuration for paper mode"""
     return {
-        'MOVE_THRESHOLD_PERCENT': MOVE_THRESHOLD_PERCENT,
-        'MOVE_THRESHOLD_MIN_POINTS': MOVE_THRESHOLD_MIN_POINTS,
-        'MOVE_THRESHOLD_MAX_POINTS': MOVE_THRESHOLD_MAX_POINTS,
         'REFERENCE_PRICE_TYPE': REFERENCE_PRICE_TYPE,
         'COOLDOWN_PERIOD': COOLDOWN_PERIOD,
         'RISK_PER_SIDE': RISK_PER_SIDE,

@@ -102,7 +102,6 @@ The bot uses separate configuration files for different trading modes. All confi
 
 ```python
 # Entry Parameters
-MOVE_THRESHOLD_PERCENT = 0.4        # Minimum 0.4% price move
 MOVE_THRESHOLD_MIN_POINTS = 3.0     # Minimum 3.0 point move
 MOVE_THRESHOLD_MAX_POINTS = 20.0    # Maximum 20.0 point move
 REFERENCE_PRICE_TYPE = 'window_high_low'  # Use rolling high/low
@@ -168,7 +167,6 @@ TOP_N_RESULTS = 5
 
 # === Tunable Parameters (for grid search) ===
 TUNABLE_PARAMETERS = {
-    'MOVE_THRESHOLD_PERCENT': [0.3, 0.4],
     'MOVE_THRESHOLD_MIN_POINTS': [3.0],
     'MOVE_THRESHOLD_MAX_POINTS': [20.0],
     'COOLDOWN_PERIOD': [20 * 60],

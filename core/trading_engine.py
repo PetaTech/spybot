@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 import time
 import os
 from dateutil import tz
+from utils import fetch_current_vix
+from config import strategy
 
 
 @dataclass
@@ -157,7 +159,6 @@ class TradingEngine:
             raise ValueError(f"Unknown mode: {mode}")
         
         # Strategy parameters
-        self.move_threshold_percent = config.get('MOVE_THRESHOLD_PERCENT', 0.4)
         self.cooldown_period = config.get('COOLDOWN_PERIOD', 20 * 60)
         self.risk_per_side = config.get('RISK_PER_SIDE', 400)
         self.option_target_multiplier = config.get('OPTION_TARGET_MULTIPLIER', 2.0)
@@ -219,13 +220,19 @@ class TradingEngine:
         self.losing_trades = 0
         
         self.log(f"🚀 Trading Engine initialized in {self.mode} mode")
-        self.log(f"📊 Strategy: {self.move_threshold_percent}% move threshold, {self.cooldown_period//60}min cooldown")
+        self.log(f"📊 Strategy: {self.cooldown_period//60}min cooldown")
         self.log(f"⏰ Market timing: {self.market_open_buffer_minutes}min open buffer, {self.market_close_buffer_minutes}min close buffer")
         self.log(f"🔄 Early signal cooldown: {self.early_signal_cooldown_minutes}min")
         self.log(f"💸 Commission: ${self.commission_per_contract:.2f} per contract, Slippage: ${self.slippage:.2f} per contract")
         self.log(f"💰 Pricing: Entry at ASK, Exit at BID (realistic trading)")
         self.log(f"🛑 Stop Loss: {self.stop_loss_percentage:.1f}% loss threshold")
         self.log(f"🚨 Emergency Stop Loss: ${self.emergency_stop_loss} daily loss limit")
+        
+        self._vix_last_fetch_time = 0
+        self._vix_value = None
+        self._vix_regime = None
+        self._set_vix_parameters(force=True)
+        self.log(f"VIX regime: {self._vix_regime} (VIX={self._vix_value})")
     
     def setup_logging(self):
         """Setup logging infrastructure"""
@@ -271,6 +278,7 @@ class TradingEngine:
         Returns:
             Dict containing processing results and actions taken
         """
+        self._set_vix_parameters()  # Refresh VIX if needed
         print(f"[ENGINE DEBUG] Processing row at {current_time}, SPY ${close:.2f}")
         
         # Check if we're in buffer periods and skip processing
@@ -510,9 +518,8 @@ class TradingEngine:
         return percentage_move, absolute_move, reference_price
     
     def should_detect_signal(self, current_time: datetime.datetime) -> bool:
-        """Detect signal using window-based percentage move"""
+        """Detect signal using window-based absolute move (VIX-based)."""
         window_minutes = self.price_window_seconds // 60
-        threshold_pct = self.move_threshold_percent / 100.0
         cooldown_minutes = self.cooldown_period // 60
 
         # Cooldown filter
@@ -525,16 +532,14 @@ class TradingEngine:
         window_prices = [p[1] for p in self.price_log if window_start <= p[0] <= current_time]
         if not window_prices:
             return False
-        
         high = max(window_prices)
         low = min(window_prices)
         if low == 0:
             return False
-        
-        price_move_pct = (high - low) / low
-        if price_move_pct >= threshold_pct:
+        absolute_move = high - low
+        if absolute_move >= self.move_threshold:
             self.last_flagged_time = current_time
-            self.log(f"🎯 WINDOW SIGNAL: {price_move_pct*100:.2f}% move in {window_minutes}min window (high={high:.2f}, low={low:.2f})")
+            self.log(f"🎯 WINDOW SIGNAL: {absolute_move:.2f}pt move in {window_minutes}min window (high={high:.2f}, low={low:.2f}) [Threshold: {self.move_threshold:.2f}]")
             return True
         return False
     
@@ -614,111 +619,57 @@ class TradingEngine:
         return True
     
     def find_valid_options(self, price: float, expiration: str) -> List[Position]:
-        """Find valid options for both call and put sides"""
+        """Find valid near-the-money call and put options within the VIX-based premium range."""
         print(f"[ENGINE DEBUG] find_valid_options called with price=${price:.2f}, expiration={expiration}")
-        
         if not self.data_provider:
             print("[ENGINE DEBUG] No data provider available")
             return []
-        
         positions = []
-        
         for attempt in range(1, self.max_retries + 1):
-            print(f"[ENGINE DEBUG] Attempt {attempt}/{self.max_retries} - Fetching option chain...")
             self.log(f"[Attempt {attempt}] Fetching option chain...")
-            
             try:
-                # Get current time from the last processed market data
-                current_time = None
-                if hasattr(self, 'last_processed_time'):
-                    current_time = self.last_processed_time
-                else:
-                    print("[ENGINE DEBUG] No current time available")
+                current_time = getattr(self, 'last_processed_time', None)
+                if not current_time:
                     return []
-                
-                print(f"[ENGINE DEBUG] Calling data_provider.get_option_chain('SPY', '{expiration}', {current_time})")
                 df_chain = self.data_provider.get_option_chain("SPY", expiration, current_time)
-                print(f"[ENGINE DEBUG] Option chain returned, shape: {df_chain.shape}")
-                
-                if df_chain.empty:
-                    print("[ENGINE DEBUG] Option chain is empty")
+                if df_chain.empty or "option_type" not in df_chain.columns:
                     self.log("[ERROR] Option chain missing or invalid.")
                     continue
-                
-                if "option_type" not in df_chain.columns:
-                    print(f"[ENGINE DEBUG] Missing option_type column. Available columns: {list(df_chain.columns)}")
-                    self.log("[ERROR] Option chain missing or invalid.")
-                    continue
-                
-                print(f"[ENGINE DEBUG] Option chain columns: {list(df_chain.columns)}")
-                print(f"[ENGINE DEBUG] Option types available: {df_chain['option_type'].unique()}")
-                
-                positions = []
-                
                 for option_type in ['C', 'P']:
-                    print(f"[ENGINE DEBUG] Processing {option_type} options...")
                     df_side = df_chain[df_chain['option_type'] == option_type].copy()
-                    print(f"[ENGINE DEBUG] {option_type} options found: {len(df_side)}")
-                    
                     if df_side.empty:
-                        print(f"[ENGINE DEBUG] No {option_type} options found")
                         continue
-                    
                     df_side['dist'] = abs(df_side['strike'] - price)
                     df_side = df_side.sort_values('dist')
-                    
-                    print(f"[ENGINE DEBUG] {option_type} options after distance calculation: {len(df_side)}")
-                    print(f"[ENGINE DEBUG] {option_type} strike range: {df_side['strike'].min():.2f} - {df_side['strike'].max():.2f}")
-                    print(f"[ENGINE DEBUG] {option_type} ask range: {df_side['ask'].min():.4f} - {df_side['ask'].max():.4f}")
-                    
-                    # Filter for valid options
-                    valid = df_side[df_side['ask'].between(self.option_ask_min, self.option_ask_max)]
-                    print(f"[ENGINE DEBUG] {option_type} options within ask range (${self.option_ask_min:.2f}-${self.option_ask_max:.2f}): {len(valid)}")
-                    
+                    # Filter for valid options in VIX-based premium range
+                    valid = df_side[df_side['ask'].between(self.premium_min, self.premium_max)]
                     if not valid.empty:
                         valid = valid[valid['ask'] > valid['bid'] * self.option_bid_ask_ratio]
-                        print(f"[ENGINE DEBUG] {option_type} options after bid/ask ratio filter (>{self.option_bid_ask_ratio}): {len(valid)}")
-                    
                     if valid.empty:
-                        print(f"[ENGINE DEBUG] No suitable {option_type} options found after filtering")
-                        self.log(f"ℹ️  No suitable {option_type} options found (price range: ${self.option_ask_min:.2f}-${self.option_ask_max:.2f})")
+                        self.log(f"ℹ️  No suitable {option_type} options found (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
                         continue
-                    
                     row = valid.iloc[0]
                     strike = row['strike']
                     entry_price = row['ask']
                     contracts = int(self.risk_per_side // (entry_price * 100))
-                    
-                    print(f"[ENGINE DEBUG] Selected {option_type} option: strike=${strike:.2f}, ask=${entry_price:.4f}, contracts={contracts}")
-                    
                     positions.append(Position(
                         type=option_type,
                         strike=strike,
                         entry_price=entry_price,
                         contracts=contracts,
-                        target=entry_price * self.option_target_multiplier,
+                        target=entry_price * self.profit_target,
                         expiration_date=expiration,
                         entry_time=datetime.datetime.now()
                     ))
-                
                 if len(positions) == 2:
-                    print("[ENGINE DEBUG] Valid options found for both sides, breaking retry loop")
-                    self.log("✅ Valid options found for both sides")
+                    self.log(f"✅ Valid options found for both sides (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
                     break
                 else:
-                    print(f"[ENGINE DEBUG] Only found {len(positions)} valid positions, need 2")
                     self.log("⏳ Waiting for better option availability...")
-                    
             except Exception as e:
-                print(f"[ENGINE DEBUG] Exception in find_valid_options: {e}")
                 self.log(f"[ERROR] Failed to fetch option chain: {str(e)}")
-            
-            if attempt < self.max_retries:
-                if self.retry_delay > 0:
-                    print(f"[ENGINE DEBUG] Sleeping for {self.retry_delay} seconds before retry...")
-                    time.sleep(self.retry_delay)
-        
-        print(f"[ENGINE DEBUG] find_valid_options returning {len(positions)} positions")
+            if attempt < self.max_retries and self.retry_delay > 0:
+                time.sleep(self.retry_delay)
         return positions
     
     def execute_entry(self, positions: List[Position], expiration: str) -> bool:
@@ -756,51 +707,24 @@ class TradingEngine:
             return False
     
     def check_exit_conditions(self, positions: List[Position], expiration: str, current_time: datetime.datetime) -> bool:
-        """Check if exit conditions are met"""
+        """Exit if either leg hits the VIX-based profit target."""
         if not self.data_provider or not positions:
             return False
-        
         try:
-            all_options_found = True
-            total_entry_cost = 0
-            total_current_value = 0
-            
-            for pos in positions:
-                total_entry_cost += pos.entry_price * 100 * pos.contracts
-            
-            # Fetch option chain once for all positions (same time and expiration)
             df_chain = self.data_provider.get_option_chain("SPY", expiration, current_time)
-            
             if df_chain.empty:
-                all_options_found = False
-            else:
-                for pos in positions:
-                    df_pos = df_chain[
-                        (df_chain['option_type'] == pos.type) & 
-                        (df_chain['strike'] == pos.strike)
-                    ]
-                    
-                    if df_pos.empty:
-                        all_options_found = False
-                        break
-                    
-                    current_price = df_pos.iloc[0]['bid']  # Use BID price for exit (selling)
-                    position_current_value = current_price * 100 * pos.contracts
-                    total_current_value += position_current_value
-            
-            if all_options_found:
-                total_profit_pct = ((total_current_value - total_entry_cost) / total_entry_cost) * 100
-                
-                if total_profit_pct >= self.min_profit_percentage:
-                    self.log(f"🎯 EXIT TRIGGERED! Combined profit {total_profit_pct:.1f}% >= {self.min_profit_percentage:.1f}%")
+                return False
+            for pos in positions:
+                df_pos = df_chain[(df_chain['option_type'] == pos.type) & (df_chain['strike'] == pos.strike)]
+                if df_pos.empty:
+                    continue
+                current_price = df_pos.iloc[0]['bid']
+                if current_price >= pos.target:
+                    self.log(f"🎯 PROFIT TARGET HIT: {pos.type} {pos.strike} | Entry: ${pos.entry_price:.2f} | Target: ${pos.target:.2f} | Current: ${current_price:.2f}")
                     return True
-                else:
-                    self.log(f"⏳ Waiting for combined profit: {total_profit_pct:.1f}% < {self.min_profit_percentage:.1f}%")
-                    return False
-                
+            return False
         except Exception as e:
             self.log(f"❌ Error checking exit conditions: {e}")
-        
         return False
     
     def check_time_based_exit(self, entry_time: datetime.datetime, current_time: datetime.datetime) -> bool:
@@ -1169,3 +1093,23 @@ class TradingEngine:
             self.log(f"🚨 EMERGENCY STOP LOSS TRIGGERED! Daily P&L: ${self.daily_pnl:.2f} <= -${self.emergency_stop_loss}")
             return True
         return False
+
+    def _set_vix_parameters(self, force=False):
+        now = time.time()
+        if force or (now - self._vix_last_fetch_time > 300):  # 5 min cache
+            vix = fetch_current_vix()
+            self._vix_last_fetch_time = now
+            self._vix_value = vix
+            if vix is not None and vix > strategy.VIX_THRESHOLD:
+                self._vix_regime = 'high_volatility'
+                self.move_threshold = strategy.HIGH_VOL_MOVE_THRESHOLD
+                self.premium_min = strategy.HIGH_VOL_PREMIUM_MIN
+                self.premium_max = strategy.HIGH_VOL_PREMIUM_MAX
+                self.profit_target = strategy.HIGH_VOL_PROFIT_TARGET
+            else:
+                self._vix_regime = 'low_volatility'
+                self.move_threshold = strategy.LOW_VOL_MOVE_THRESHOLD
+                self.premium_min = strategy.LOW_VOL_PREMIUM_MIN
+                self.premium_max = strategy.LOW_VOL_PREMIUM_MAX
+                self.profit_target = strategy.LOW_VOL_PROFIT_TARGET
+            self.log(f"[VIX] Refreshed: VIX={vix}, regime={self._vix_regime}")
