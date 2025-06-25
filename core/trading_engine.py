@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 import time
 import os
 from dateutil import tz
-from utils import fetch_current_vix
+from utils import fetch_current_vix, fetch_vix_at_datetime
 from config import strategy
 
 
@@ -278,7 +278,7 @@ class TradingEngine:
         Returns:
             Dict containing processing results and actions taken
         """
-        self._set_vix_parameters()  # Refresh VIX if needed
+        self._set_vix_parameters(target_datetime=current_time)  # Pass current_time for backtesting
         print(f"[ENGINE DEBUG] Processing row at {current_time}, SPY ${close:.2f}")
         
         # Check if we're in buffer periods and skip processing
@@ -1094,10 +1094,17 @@ class TradingEngine:
             return True
         return False
 
-    def _set_vix_parameters(self, force=False):
+    def _set_vix_parameters(self, force=False, target_datetime=None):
         now = time.time()
         if force or (now - self._vix_last_fetch_time > 300):  # 5 min cache
-            vix = fetch_current_vix()
+            # Use historical VIX for backtesting, current VIX for live/paper
+            if self.mode == "backtest" and target_datetime:
+                vix = fetch_vix_at_datetime(target_datetime)
+                self.log(f"[VIX] Backtest mode: Fetching VIX for {target_datetime}")
+            else:
+                vix = fetch_current_vix()
+                self.log(f"[VIX] Live/Paper mode: Fetching current VIX")
+            
             self._vix_last_fetch_time = now
             self._vix_value = vix
             if vix is not None and vix > strategy.VIX_THRESHOLD:
