@@ -28,9 +28,43 @@ from config.backtest_single import *
 from config.backtest_batch import *
 
 
+def calculate_sharpe_ratio(pnl: float, max_drawdown: float, total_trades: int) -> float:
+    """Calculate Sharpe ratio (simplified version)"""
+    if total_trades == 0 or max_drawdown == 0:
+        return 0.0
+    # Simplified Sharpe: Return / Risk (using max drawdown as risk proxy)
+    return pnl / abs(max_drawdown) if max_drawdown != 0 else 0.0
+
+
+def calculate_risk_adjusted_return(pnl: float, max_drawdown: float) -> float:
+    """Calculate risk-adjusted return"""
+    if max_drawdown == 0:
+        return pnl if pnl > 0 else 0.0
+    return pnl / abs(max_drawdown)
+
+
+def calculate_consistency_score(win_rate: float, profit_factor: float) -> float:
+    """Calculate consistency score based on win rate and profit factor"""
+    # Normalize win rate (0-1) and profit factor (0-10)
+    normalized_win_rate = min(win_rate / 100.0, 1.0)
+    normalized_profit_factor = min(profit_factor / 10.0, 1.0)
+    return (normalized_win_rate + normalized_profit_factor) / 2.0
+
+
+def calculate_risk_score(max_drawdown: float, total_trades: int, avg_loss: float) -> float:
+    """Calculate risk score (lower is better)"""
+    if total_trades == 0:
+        return 1.0
+    # Combine drawdown, trade frequency, and average loss
+    drawdown_risk = min(abs(max_drawdown) / 1000.0, 1.0)  # Normalize to 0-1
+    frequency_risk = min(total_trades / 100.0, 1.0)  # More trades = more risk
+    loss_risk = min(abs(avg_loss) / 100.0, 1.0)  # Normalize average loss
+    return (drawdown_risk + frequency_risk + loss_risk) / 3.0
+
+
 @dataclass
 class OptimizationResult:
-    """Container for optimization results"""
+    """Container for optimization results with comprehensive metrics"""
     config: Dict
     win_rate: float
     total_pnl: float
@@ -42,6 +76,14 @@ class OptimizationResult:
     avg_loss: float
     profit_factor: float
     execution_time: float
+    # Additional metrics for better ranking
+    sharpe_ratio: float = 0.0
+    risk_adjusted_return: float = 0.0
+    avg_trade_pnl: float = 0.0
+    max_consecutive_losses: int = 0
+    consistency_score: float = 0.0
+    risk_score: float = 0.0
+    composite_score: float = 0.0
 
 
 def _run_backtest_worker_standalone(config: Dict) -> OptimizationResult:
@@ -64,18 +106,41 @@ def _run_backtest_worker_standalone(config: Dict) -> OptimizationResult:
         
         execution_time = time.time() - start_time
         
+        # Extract basic metrics
+        win_rate = result.get('win_rate', 0.0)
+        total_pnl = result.get('total_pnl', 0.0)
+        max_drawdown = result.get('max_drawdown', 0.0)
+        total_trades = result.get('total_trades', 0)
+        winning_trades = result.get('winning_trades', 0)
+        losing_trades = result.get('losing_trades', 0)
+        avg_win = result.get('avg_win', 0.0)
+        avg_loss = result.get('avg_loss', 0.0)
+        profit_factor = result.get('profit_factor', 0.0)
+        
+        # Calculate additional metrics
+        sharpe_ratio = calculate_sharpe_ratio(total_pnl, max_drawdown, total_trades)
+        risk_adjusted_return = calculate_risk_adjusted_return(total_pnl, max_drawdown)
+        avg_trade_pnl = total_pnl / total_trades if total_trades > 0 else 0.0
+        consistency_score = calculate_consistency_score(win_rate, profit_factor)
+        risk_score = calculate_risk_score(max_drawdown, total_trades, avg_loss)
+        
         return OptimizationResult(
             config=config,
-            win_rate=result.get('win_rate', 0.0),
-            total_pnl=result.get('total_pnl', 0.0),
-            max_drawdown=result.get('max_drawdown', 0.0),
-            total_trades=result.get('total_trades', 0),
-            winning_trades=result.get('winning_trades', 0),
-            losing_trades=result.get('losing_trades', 0),
-            avg_win=result.get('avg_win', 0.0),
-            avg_loss=result.get('avg_loss', 0.0),
-            profit_factor=result.get('profit_factor', 0.0),
-            execution_time=execution_time
+            win_rate=win_rate,
+            total_pnl=total_pnl,
+            max_drawdown=max_drawdown,
+            total_trades=total_trades,
+            winning_trades=winning_trades,
+            losing_trades=losing_trades,
+            avg_win=avg_win,
+            avg_loss=avg_loss,
+            profit_factor=profit_factor,
+            execution_time=execution_time,
+            sharpe_ratio=sharpe_ratio,
+            risk_adjusted_return=risk_adjusted_return,
+            avg_trade_pnl=avg_trade_pnl,
+            consistency_score=consistency_score,
+            risk_score=risk_score
         )
         
     except Exception as e:
@@ -92,7 +157,12 @@ def _run_backtest_worker_standalone(config: Dict) -> OptimizationResult:
             avg_win=0.0,
             avg_loss=0.0,
             profit_factor=0.0,
-            execution_time=time.time() - start_time
+            execution_time=time.time() - start_time,
+            sharpe_ratio=0.0,
+            risk_adjusted_return=0.0,
+            avg_trade_pnl=0.0,
+            consistency_score=0.0,
+            risk_score=1.0
         )
 
 
@@ -156,6 +226,65 @@ class AnalyticsEngine:
         print(f"✅ Generated {len(configs)} configuration combinations for grid search")
         return configs
     
+    def filter_results(self, results: List[OptimizationResult]) -> List[OptimizationResult]:
+        """
+        Filter results based on minimum criteria
+        """
+        print("🔍 Filtering results based on minimum criteria...")
+        
+        # Minimum criteria for viable strategies
+        min_trades = 5
+        min_win_rate = 20.0
+        min_profit_factor = 0.5
+        
+        filtered_results = []
+        for result in results:
+            if (result.total_trades >= min_trades and 
+                result.win_rate >= min_win_rate and 
+                result.profit_factor >= min_profit_factor):
+                filtered_results.append(result)
+        
+        print(f"  Original results: {len(results)}")
+        print(f"  Filtered results: {len(filtered_results)}")
+        print(f"  Removed: {len(results) - len(filtered_results)} configs")
+        
+        return filtered_results
+    
+    def rank_results(self, results: List[OptimizationResult]) -> List[OptimizationResult]:
+        """
+        Rank results using multiple criteria with weighted scoring
+        """
+        print("📊 Ranking results using comprehensive scoring...")
+        
+        for result in results:
+            # Calculate composite score (0-100)
+            # Weighted components:
+            # - Win Rate: 25%
+            # - Risk-Adjusted Return: 25%
+            # - Consistency Score: 20%
+            # - Profit Factor: 15%
+            # - Sharpe Ratio: 15%
+            
+            win_rate_score = min(result.win_rate, 100.0) * 0.25
+            risk_adj_score = min(result.risk_adjusted_return * 10, 25.0) * 0.25  # Scale up
+            consistency_score = result.consistency_score * 20.0  # Scale to 0-20
+            profit_factor_score = min(result.profit_factor * 2.5, 15.0)  # Scale to 0-15
+            sharpe_score = min(result.sharpe_ratio * 5, 15.0)  # Scale to 0-15
+            
+            result.composite_score = (
+                win_rate_score + 
+                risk_adj_score + 
+                consistency_score + 
+                profit_factor_score + 
+                sharpe_score
+            )
+        
+        # Sort by composite score (descending)
+        results.sort(key=lambda x: x.composite_score, reverse=True)
+        
+        print(f"✅ Results ranked by composite score")
+        return results
+    
     def run_single_backtest(self, config: Dict) -> OptimizationResult:
         """
         Run a single backtest using backtest_single.py run_backtest function
@@ -178,18 +307,41 @@ class AnalyticsEngine:
             
             execution_time = time.time() - start_time
             
+            # Extract and calculate metrics (same as worker function)
+            win_rate = result.get('win_rate', 0.0)
+            total_pnl = result.get('total_pnl', 0.0)
+            max_drawdown = result.get('max_drawdown', 0.0)
+            total_trades = result.get('total_trades', 0)
+            winning_trades = result.get('winning_trades', 0)
+            losing_trades = result.get('losing_trades', 0)
+            avg_win = result.get('avg_win', 0.0)
+            avg_loss = result.get('avg_loss', 0.0)
+            profit_factor = result.get('profit_factor', 0.0)
+            
+            # Calculate additional metrics
+            sharpe_ratio = calculate_sharpe_ratio(total_pnl, max_drawdown, total_trades)
+            risk_adjusted_return = calculate_risk_adjusted_return(total_pnl, max_drawdown)
+            avg_trade_pnl = total_pnl / total_trades if total_trades > 0 else 0.0
+            consistency_score = calculate_consistency_score(win_rate, profit_factor)
+            risk_score = calculate_risk_score(max_drawdown, total_trades, avg_loss)
+            
             return OptimizationResult(
                 config=config,
-                win_rate=result.get('win_rate', 0.0),
-                total_pnl=result.get('total_pnl', 0.0),
-                max_drawdown=result.get('max_drawdown', 0.0),
-                total_trades=result.get('total_trades', 0),
-                winning_trades=result.get('winning_trades', 0),
-                losing_trades=result.get('losing_trades', 0),
-                avg_win=result.get('avg_win', 0.0),
-                avg_loss=result.get('avg_loss', 0.0),
-                profit_factor=result.get('profit_factor', 0.0),
-                execution_time=execution_time
+                win_rate=win_rate,
+                total_pnl=total_pnl,
+                max_drawdown=max_drawdown,
+                total_trades=total_trades,
+                winning_trades=winning_trades,
+                losing_trades=losing_trades,
+                avg_win=avg_win,
+                avg_loss=avg_loss,
+                profit_factor=profit_factor,
+                execution_time=execution_time,
+                sharpe_ratio=sharpe_ratio,
+                risk_adjusted_return=risk_adjusted_return,
+                avg_trade_pnl=avg_trade_pnl,
+                consistency_score=consistency_score,
+                risk_score=risk_score
             )
             
         except Exception as e:
@@ -206,7 +358,12 @@ class AnalyticsEngine:
                 avg_win=0.0,
                 avg_loss=0.0,
                 profit_factor=0.0,
-                execution_time=time.time() - start_time
+                execution_time=time.time() - start_time,
+                sharpe_ratio=0.0,
+                risk_adjusted_return=0.0,
+                avg_trade_pnl=0.0,
+                consistency_score=0.0,
+                risk_score=1.0
             )
     
     def run_optimization(self) -> List[OptimizationResult]:
@@ -227,9 +384,16 @@ class AnalyticsEngine:
         is_colab = self._is_running_in_colab()
         if is_colab:
             print("🔄 Detected Google Colab environment - using batching")
-            return self._run_optimization_batched(configs)
+            results = self._run_optimization_batched(configs)
         else:
-            return self._run_optimization_parallel(configs)
+            results = self._run_optimization_parallel(configs)
+        
+        # Filter and rank results
+        print("\n🔍 Post-processing results...")
+        filtered_results = self.filter_results(results)
+        ranked_results = self.rank_results(filtered_results)
+        
+        return ranked_results
     
     def _is_running_in_colab(self) -> bool:
         """Check if running in Google Colab environment"""
@@ -291,16 +455,17 @@ class AnalyticsEngine:
                         avg_win=0.0,
                         avg_loss=0.0,
                         profit_factor=0.0,
-                        execution_time=0.0
+                        execution_time=0.0,
+                        sharpe_ratio=0.0,
+                        risk_adjusted_return=0.0,
+                        avg_trade_pnl=0.0,
+                        consistency_score=0.0,
+                        risk_score=1.0
                     ))
                     completed += 1
         
         total_time = time.time() - start_time
         print(f"✅ Parallel execution completed in {total_time:.2f}s")
-        
-        # Sort by win rate and total PnL
-        print("📊 Sorting results by performance...")
-        all_results.sort(key=lambda x: (x.win_rate, x.total_pnl), reverse=True)
         
         return all_results
     
@@ -325,9 +490,6 @@ class AnalyticsEngine:
             
             print(f"✅ Completed batch {batch_start//BATCH_SIZE + 1}: {len(batch_results)} results")
         
-        # Sort by win rate and total PnL
-        all_results.sort(key=lambda x: (x.win_rate, x.total_pnl), reverse=True)
-        
         return all_results
     
     def print_top_results(self, results: List[OptimizationResult], top_n: int = None, log_file: io.TextIOBase = None):
@@ -337,21 +499,30 @@ class AnalyticsEngine:
         print(f"\n{'='*80}", file=output)
         print(f"TOP {top_n} STRATEGY CONFIGURATIONS", file=output)
         print(f"{'='*80}", file=output)
+        
         for i, result in enumerate(results[:top_n], 1):
-            print(f"\n{i}. Configuration (Win Rate: {result.win_rate:.1f}%, PnL: ${result.total_pnl:.2f})", file=output)
+            print(f"\n{i}. Configuration (Score: {result.composite_score:.1f}, Win Rate: {result.win_rate:.1f}%, PnL: ${result.total_pnl:.2f})", file=output)
             print(f"{'='*60}", file=output)
             print("Tunable Parameters:", file=output)
             for key, value in result.config.items():
                 if key not in self.fixed_params:
                     print(f"  {key}: {value}", file=output)
             print(f"\nPerformance Metrics:", file=output)
+            print(f"  Composite Score: {result.composite_score:.1f}/100", file=output)
             print(f"  Win Rate: {result.win_rate:.1f}%", file=output)
             print(f"  Total PnL: ${result.total_pnl:.2f}", file=output)
             print(f"  Max Drawdown: ${result.max_drawdown:.2f}", file=output)
+            print(f"  Risk-Adjusted Return: {result.risk_adjusted_return:.2f}", file=output)
+            print(f"  Sharpe Ratio: {result.sharpe_ratio:.2f}", file=output)
+            print(f"  Profit Factor: {result.profit_factor:.2f}", file=output)
+            print(f"  Consistency Score: {result.consistency_score:.2f}", file=output)
+            print(f"  Risk Score: {result.risk_score:.2f}", file=output)
             print(f"  Total Trades: {result.total_trades:.0f}", file=output)
             print(f"  Winning Trades: {result.winning_trades:.0f}", file=output)
             print(f"  Losing Trades: {result.losing_trades:.0f}", file=output)
+            print(f"  Avg Trade PnL: ${result.avg_trade_pnl:.2f}", file=output)
             print(f"  Execution Time: {result.execution_time:.2f}s", file=output)
+        
         # Print to console
         print(output.getvalue())
         # Also write to log file if provided

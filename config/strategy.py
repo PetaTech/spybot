@@ -7,12 +7,10 @@ Core strategy parameters shared across all trading modes
 REFERENCE_PRICE_TYPE = 'window_high_low'  # 'open', 'prev_close', 'vwap', 'window_high_low'
 COOLDOWN_PERIOD = 20 * 60  # 20 minutes between trades
 RISK_PER_SIDE = 400  # $ risk per side
-OPTION_TARGET_MULTIPLIER = 2.35  # Exit at 2.35x entry price
 MAX_RETRIES = 6  # Maximum retries for option chain fetching
 RETRY_DELAY = 5  # Seconds between retries
 PRICE_WINDOW_SECONDS = 30 * 60  # 30 minutes rolling window
 MAX_ENTRY_TIME = '15:00'  # Stop entering after 3 PM
-MIN_PROFIT_PERCENTAGE = 30.0  # Minimum 30% profit to exit (instead of fixed 50%)
 
 # === Option Filtering Parameters ===
 OPTION_ASK_MIN = 0.5  # Minimum ask price for valid options

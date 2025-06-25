@@ -14,7 +14,6 @@ import time
 import os
 from dateutil import tz
 from utils import fetch_current_vix, fetch_vix_at_datetime
-from config import strategy
 
 
 @dataclass
@@ -161,12 +160,10 @@ class TradingEngine:
         # Strategy parameters
         self.cooldown_period = config.get('COOLDOWN_PERIOD', 20 * 60)
         self.risk_per_side = config.get('RISK_PER_SIDE', 400)
-        self.option_target_multiplier = config.get('OPTION_TARGET_MULTIPLIER', 2.0)
         self.max_retries = config.get('MAX_RETRIES', 6)
         self.retry_delay = config.get('RETRY_DELAY', 1)
         self.price_window_seconds = config.get('PRICE_WINDOW_SECONDS', 30 * 60)
         self.max_entry_time = config.get('MAX_ENTRY_TIME', datetime.time(15, 0))
-        self.min_profit_percentage = config.get('MIN_PROFIT_PERCENTAGE', 10.0)
         self.max_hold_seconds = config.get('MAX_HOLD_SECONDS', 3600)
         self.stop_loss_percentage = config.get('STOP_LOSS_PERCENTAGE', 30.0)
         self.emergency_stop_loss = config.get('EMERGENCY_STOP_LOSS', 2000)
@@ -193,6 +190,20 @@ class TradingEngine:
         self.market_open = config.get('MARKET_OPEN', '09:30')
         self.market_close = config.get('MARKET_CLOSE', '16:00')
         self.timezone = config.get('TIMEZONE', 'America/New_York')
+        
+        # Reference price type for percentage calculations
+        self.reference_price_type = config.get('REFERENCE_PRICE_TYPE', 'window_high_low')
+        
+        # VIX-based strategy parameters from config
+        self.vix_threshold = config.get('VIX_THRESHOLD', 25)
+        self.high_vol_move_threshold = config.get('HIGH_VOL_MOVE_THRESHOLD', 3.5)
+        self.high_vol_premium_min = config.get('HIGH_VOL_PREMIUM_MIN', 1.05)
+        self.high_vol_premium_max = config.get('HIGH_VOL_PREMIUM_MAX', 2.20)
+        self.high_vol_profit_target = config.get('HIGH_VOL_PROFIT_TARGET', 1.35)
+        self.low_vol_move_threshold = config.get('LOW_VOL_MOVE_THRESHOLD', 2.5)
+        self.low_vol_premium_min = config.get('LOW_VOL_PREMIUM_MIN', 0.40)
+        self.low_vol_premium_max = config.get('LOW_VOL_PREMIUM_MAX', 1.05)
+        self.low_vol_profit_target = config.get('LOW_VOL_PROFIT_TARGET', 1.35)
         
         # State tracking
         self.active_trades: List[List[Position]] = []
@@ -221,6 +232,7 @@ class TradingEngine:
         
         self.log(f"🚀 Trading Engine initialized in {self.mode} mode")
         self.log(f"📊 Strategy: {self.cooldown_period//60}min cooldown")
+        self.log(f"📈 Reference price type: {self.reference_price_type}")
         self.log(f"⏰ Market timing: {self.market_open_buffer_minutes}min open buffer, {self.market_close_buffer_minutes}min close buffer")
         self.log(f"🔄 Early signal cooldown: {self.early_signal_cooldown_minutes}min")
         self.log(f"💸 Commission: ${self.commission_per_contract:.2f} per contract, Slippage: ${self.slippage:.2f} per contract")
@@ -228,11 +240,13 @@ class TradingEngine:
         self.log(f"🛑 Stop Loss: {self.stop_loss_percentage:.1f}% loss threshold")
         self.log(f"🚨 Emergency Stop Loss: ${self.emergency_stop_loss} daily loss limit")
         
+        # VIX parameters initialization
         self._vix_last_fetch_time = 0
         self._vix_value = None
         self._vix_regime = None
         self._set_vix_parameters(force=True)
         self.log(f"VIX regime: {self._vix_regime} (VIX={self._vix_value})")
+        self.log(f"VIX config: threshold={self.vix_threshold}, high_vol_move={self.high_vol_move_threshold}, low_vol_move={self.low_vol_move_threshold}")
     
     def setup_logging(self):
         """Setup logging infrastructure"""
@@ -509,7 +523,22 @@ class TradingEngine:
             return 0.0, 0.0, 0.0
         
         absolute_move = max(window_prices) - min(window_prices)
-        reference_price = min(window_prices)  # Use low as reference for percentage calculation
+        
+        # Use configurable reference price type
+        if self.reference_price_type == 'window_high_low':
+            reference_price = min(window_prices)  # Use low as reference for percentage calculation
+        elif self.reference_price_type == 'open':
+            reference_price = window_prices[0]  # Use first price in window
+        elif self.reference_price_type == 'prev_close':
+            # Use the price before the window
+            prev_prices = [p[1] for p in self.price_log if p[0] < window_start]
+            reference_price = prev_prices[-1] if prev_prices else window_prices[0]
+        elif self.reference_price_type == 'vwap':
+            # Calculate VWAP (Volume Weighted Average Price) - simplified to average for now
+            reference_price = sum(window_prices) / len(window_prices)
+        else:
+            # Default to window low
+            reference_price = min(window_prices)
         
         if reference_price <= 0:
             return 0.0, absolute_move, reference_price
@@ -1107,16 +1136,16 @@ class TradingEngine:
             
             self._vix_last_fetch_time = now
             self._vix_value = vix
-            if vix is not None and vix > strategy.VIX_THRESHOLD:
+            if vix is not None and vix > self.vix_threshold:
                 self._vix_regime = 'high_volatility'
-                self.move_threshold = strategy.HIGH_VOL_MOVE_THRESHOLD
-                self.premium_min = strategy.HIGH_VOL_PREMIUM_MIN
-                self.premium_max = strategy.HIGH_VOL_PREMIUM_MAX
-                self.profit_target = strategy.HIGH_VOL_PROFIT_TARGET
+                self.move_threshold = self.high_vol_move_threshold
+                self.premium_min = self.high_vol_premium_min
+                self.premium_max = self.high_vol_premium_max
+                self.profit_target = self.high_vol_profit_target
             else:
                 self._vix_regime = 'low_volatility'
-                self.move_threshold = strategy.LOW_VOL_MOVE_THRESHOLD
-                self.premium_min = strategy.LOW_VOL_PREMIUM_MIN
-                self.premium_max = strategy.LOW_VOL_PREMIUM_MAX
-                self.profit_target = strategy.LOW_VOL_PROFIT_TARGET
+                self.move_threshold = self.low_vol_move_threshold
+                self.premium_min = self.low_vol_premium_min
+                self.premium_max = self.low_vol_premium_max
+                self.profit_target = self.low_vol_profit_target
             self.log(f"[VIX] Refreshed: VIX={vix}, regime={self._vix_regime}")
