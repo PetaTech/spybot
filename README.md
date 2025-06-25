@@ -188,7 +188,6 @@ TUNABLE_PARAMETERS = {
 }
 
 # === Output Settings ===
-RESULTS_FILENAME = "analytics_results.csv"
 LOG_LEVEL = 'INFO'
 ```
 

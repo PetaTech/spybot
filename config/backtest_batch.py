@@ -21,12 +21,13 @@ SAFETY_ROW_LIMIT = 5000  # Reduced safety limit
 
 TUNABLE_PARAMETERS = {
     # Core strategy parameters (small sets for testing)
+    'MIN_PROFIT_PERCENTAGE': [20.0, 30.0, 40.0],
+    'STOP_LOSS_PERCENTAGE': [30.0, 40.0, 50.0],
+    'OPTION_TARGET_MULTIPLIER': [2.35, 2.5, 2.75],
+
     'COOLDOWN_PERIOD': [20 * 60],  # minutes in seconds
     'RISK_PER_SIDE': [400],
-    'OPTION_TARGET_MULTIPLIER': [2.35],
-    'MIN_PROFIT_PERCENTAGE': [30.0],
     'MAX_HOLD_SECONDS': [3600],  # 1hr
-    'STOP_LOSS_PERCENTAGE': [12.0],
     
     # Option filtering parameters (small sets)
     'OPTION_ASK_MIN': [0.5],
@@ -34,7 +35,7 @@ TUNABLE_PARAMETERS = {
     'OPTION_BID_ASK_RATIO': [0.5],
     
     # Risk management (small sets)
-    'MAX_DAILY_TRADES': [5],
+    'MAX_DAILY_TRADES': [500000],
     'MAX_DAILY_LOSS': [1000],
     'EMERGENCY_STOP_LOSS': [2000],
     
@@ -57,5 +58,4 @@ FIXED_PARAMETERS = {
 }
 
 # === Output Settings ===
-RESULTS_FILENAME = "analytics_results.csv"
 LOG_LEVEL = 'INFO' 
