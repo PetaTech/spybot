@@ -10,7 +10,7 @@ import pandas as pd
 from dateutil import tz
 from typing import Optional, Iterator, Dict
 from core.trading_engine import TradingEngine, DataProvider
-from utils.tradier_api import set_api_credentials, get_spy_price, get_option_chain, test_connection
+from utils.tradier_api import set_api_credentials, get_spy_ohlc, get_option_chain, test_connection
 from config.live import *
 
 # Set API credentials before importing other modules
@@ -25,49 +25,27 @@ class LiveDataProvider(DataProvider):
         self.access_token = access_token
         self.last_price = None
         self.last_time = None
-        self.price_history = []  # Track price history for OHLC calculation
-        self.window_minutes = 30  # 30-minute window for OHLC
     
     def stream(self) -> Iterator[Dict]:
         """Stream live market data rows"""
         while True:
             try:
                 now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
-                price = get_spy_price()
+                ohlc = get_spy_ohlc()
                 
-                # Track price history for OHLC calculation
-                self.price_history.append((now, price))
-                
-                # Keep only prices within the window
-                window_start = now - datetime.timedelta(minutes=self.window_minutes)
-                self.price_history = [(t, p) for t, p in self.price_history if t >= window_start]
-                
-                # Calculate OHLC from recent price history
-                if len(self.price_history) > 1:
-                    prices = [p for _, p in self.price_history]
-                    open_price = prices[0]
-                    high_price = max(prices)
-                    low_price = min(prices)
-                    close_price = prices[-1]
-                else:
-                    # If only one price point, use it for all
-                    open_price = high_price = low_price = close_price = price
-                
-                # Create market row
+                # Create market row with real OHLC data
                 row = {
                     'current_time': now,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'volume': 0,  # Not available from API
+                    'open': ohlc['open'],
+                    'high': ohlc['high'],
+                    'low': ohlc['low'],
+                    'close': ohlc['close'],
+                    'volume': ohlc['volume'],
                     'symbol': 'SPY'
                 }
                 
                 # Debug logging
-                if len(self.price_history) > 1:
-                    price_range = high_price - low_price
-                    print(f"[LIVE DATA] {now.strftime('%H:%M:%S')} SPY: O={open_price:.2f} H={high_price:.2f} L={low_price:.2f} C={close_price:.2f} Range={price_range:.2f}pts")
+                print(f"[LIVE DATA] {now.strftime('%H:%M:%S')} SPY: O={ohlc['open']:.2f} H={ohlc['high']:.2f} L={ohlc['low']:.2f} C={ohlc['close']:.2f} V={ohlc['volume']}")
                 
                 yield row
                 

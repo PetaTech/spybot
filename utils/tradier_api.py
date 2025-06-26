@@ -54,11 +54,25 @@ def get_api_instance() -> TradierAPI:
 
 # === Backward Compatibility Functions ===
 def get_spy_price():
-    """Get current SPY price"""
+    """Get current SPY price (backward compatibility)"""
+    return get_spy_ohlc()['close']
+
+def get_spy_ohlc():
+    """Get current SPY OHLC data"""
     api = get_api_instance()
     data = api.request("/markets/quotes", params={"symbols": "SPY"})
     quote = data.get("quotes", {}).get("quote", {})
-    return float(quote.get("last", 0.0))
+    
+    # Extract OHLC data from Tradier quote
+    ohlc = {
+        'open': float(quote.get("open", 0.0)),
+        'high': float(quote.get("high", 0.0)), 
+        'low': float(quote.get("low", 0.0)),
+        'close': float(quote.get("last", 0.0)),  # 'last' is current close
+        'volume': int(quote.get("volume", 0))
+    }
+    
+    return ohlc
 
 def get_option_chain(symbol: str, expiration_date: str) -> pd.DataFrame:
     """Get option chain for given symbol and expiration"""
