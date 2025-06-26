@@ -1191,8 +1191,9 @@ class TradingEngine:
             
             # Log changes
             if old_threshold != self.move_threshold or old_regime != self._vix_regime:
+                old_threshold_str = f"{old_threshold:.2f}" if old_threshold is not None else "None"
                 self.log(f"[VIX] PARAMETERS UPDATED: VIX={vix:.2f}, Regime={self._vix_regime}")
-                self.log(f"   📊 Move Threshold: {old_threshold:.2f} → {self.move_threshold:.2f}pts")
+                self.log(f"   📊 Move Threshold: {old_threshold_str} → {self.move_threshold:.2f}pts")
                 self.log(f"   💰 Premium Range: ${self.premium_min:.2f} - ${self.premium_max:.2f}")
                 self.log(f"   🎯 Profit Target: {self.profit_target:.2f}x")
             else:
