@@ -25,6 +25,8 @@ class PaperDataProvider(DataProvider):
         self.access_token = access_token
         self.last_price = None
         self.last_time = None
+        self.price_history = []  # Track price history for OHLC calculation
+        self.window_minutes = 30  # 30-minute window for OHLC
     
     def stream(self) -> Iterator[Dict]:
         """Stream live market data rows"""
@@ -33,16 +35,39 @@ class PaperDataProvider(DataProvider):
                 now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
                 price = get_spy_price()
                 
+                # Track price history for OHLC calculation
+                self.price_history.append((now, price))
+                
+                # Keep only prices within the window
+                window_start = now - datetime.timedelta(minutes=self.window_minutes)
+                self.price_history = [(t, p) for t, p in self.price_history if t >= window_start]
+                
+                # Calculate OHLC from recent price history
+                if len(self.price_history) > 1:
+                    prices = [p for _, p in self.price_history]
+                    open_price = prices[0]
+                    high_price = max(prices)
+                    low_price = min(prices)
+                    close_price = prices[-1]
+                else:
+                    # If only one price point, use it for all
+                    open_price = high_price = low_price = close_price = price
+                
                 # Create market row
                 row = {
                     'current_time': now,
-                    'open': price,
-                    'high': price,
-                    'low': price,
-                    'close': price,
+                    'open': open_price,
+                    'high': high_price,
+                    'low': low_price,
+                    'close': close_price,
                     'volume': 0,  # Not available from API
                     'symbol': 'SPY'
                 }
+                
+                # Debug logging
+                if len(self.price_history) > 1:
+                    price_range = high_price - low_price
+                    print(f"[PAPER DATA] {now.strftime('%H:%M:%S')} SPY: O={open_price:.2f} H={high_price:.2f} L={low_price:.2f} C={close_price:.2f} Range={price_range:.2f}pts")
                 
                 yield row
                 
@@ -105,6 +130,21 @@ def main():
     if not test_connection():
         print("❌ Failed to connect to API. Exiting...")
         return
+    
+    # Check market hours
+    now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
+    market_open = datetime.datetime.strptime(MARKET_OPEN, '%H:%M').time()
+    market_close = datetime.datetime.strptime(MARKET_CLOSE, '%H:%M').time()
+    
+    print(f"\n🕐 Current Time (NY): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    print(f"📈 Market Hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
+    
+    if not (market_open <= now.time() <= market_close):
+        print("❌ Market is currently CLOSED. Paper trading will not detect signals.")
+        print("💡 Try running during market hours (9:30 AM - 4:00 PM EDT)")
+        return
+    
+    print("✅ Market is OPEN. Starting paper trading...")
     
     # Create data provider and config
     data_provider = PaperDataProvider(TRADIER_API_URL, TRADIER_ACCESS_TOKEN)

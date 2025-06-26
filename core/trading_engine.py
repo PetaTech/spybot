@@ -380,6 +380,8 @@ class TradingEngine:
         move_percent, absolute_move, reference_price = self.calculate_percentage_move(market_row.current_time)
         result['move_percent'] = move_percent
         
+        self.log(f"📊 Processing: SPY=${market_row.close:.2f} | Move: {move_percent:.2f}% ({absolute_move:.2f}pts) | Active trades: {len(self.active_trades)}")
+        
         print(f"[ENGINE DEBUG] Move calculation: {move_percent:.2f}% ({absolute_move:.2f} points)")
         
         # Check for exits on all active trades
@@ -446,13 +448,16 @@ class TradingEngine:
             result['signal_detected'] = True
             self.total_signals += 1
             self.log(f"🎯 SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+            
+            # Check entry conditions
+            self.log(f"🔍 Checking entry conditions...")
             if self.is_entry_allowed(market_row.current_time):
                 if not self.check_daily_limits(market_row.current_time):
                     result['action'] = 'signal_skipped'
                     result['error'] = 'Daily limits reached'
                     self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
                 else:
-                    self.log(f"🚀 ENTRY SIGNAL! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                    self.log(f"🚀 ENTRY SIGNAL APPROVED! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
                     expiration = market_row.current_time.strftime("%Y-%m-%d")
                     # Diagnostic logging for options loading
                     self.log(f"[DIAG] Requesting option chain for time: {market_row.current_time}, expiration: {expiration}")
@@ -471,17 +476,13 @@ class TradingEngine:
                             total_entry_cost = entry_cost + entry_commission
                             
                             result['action'] = 'entry'
-                            result['positions'] = positions
+                            result['positions'] = positions.copy()
                             result['entry_cost'] = entry_cost
                             result['entry_commission'] = entry_commission
                             result['total_entry_cost'] = total_entry_cost
                             
                             self.increment_daily_trades()
-                            self.total_trades += 1
-                            
-                            self.log(f"✅ ENTRY COMPLETE. Cost: ${entry_cost:.2f} + Commission: ${entry_commission:.2f} = Total: ${total_entry_cost:.2f} | Active trades: {len(self.active_trades)}")
-                            
-                            # Log comprehensive entry result
+                            self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
                             self.log_comprehensive_result(result)
                         else:
                             result['action'] = 'entry_failed'
@@ -489,16 +490,21 @@ class TradingEngine:
                             self.log(f"❌ ENTRY FAILED: {result['error']}")
                     else:
                         result['action'] = 'signal_skipped'
-                        result['error'] = 'No valid options available'
+                        result['error'] = f'Only {len(positions)} valid options found (need 2)'
                         self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
             else:
                 result['action'] = 'signal_skipped'
-                result['error'] = 'Entry not allowed (cooldown/time constraints)'
+                result['error'] = 'Entry not allowed (market timing/cooldown)'
                 self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+        else:
+            self.log(f"   ❌ No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
         
         # Log overall performance periodically (every 5 trades or when significant events occur)
-        if self.total_trades > 0 and (self.total_trades % 5 == 0 or result['action'] in ['entry', 'exit']):
+        if self.total_trades % 5 == 0 and self.total_trades > 0:
             self.log_overall_performance()
+        
+        # Log summary for this processing cycle
+        self.log(f"📋 CYCLE SUMMARY: {current_time.strftime('%H:%M:%S')} | Action: {result['action']} | Signals: {self.total_signals} | Trades: {self.total_trades} | Active: {len(self.active_trades)}")
         
         print(f"[ENGINE DEBUG] Row processing complete, action: {result['action']}")
         return result
@@ -509,7 +515,14 @@ class TradingEngine:
         
         # Keep prices for window duration plus buffer
         cutoff_time = current_time - datetime.timedelta(seconds=self.price_window_seconds + 300)
+        old_count = len(self.price_log)
         self.price_log = [p for p in self.price_log if p[0] >= cutoff_time]
+        new_count = len(self.price_log)
+        
+        if old_count != new_count:
+            self.log(f"🧹 Cleaned price log: {old_count} → {new_count} entries (removed {old_count - new_count} old entries)")
+        
+        self.log(f"📈 Price updated: {current_time.strftime('%H:%M:%S')} SPY=${price:.2f} (log size: {len(self.price_log)} entries)")
     
     def calculate_percentage_move(self, current_time: datetime.datetime) -> Tuple[float, float, float]:
         """Calculate percentage move within the window"""
@@ -551,26 +564,49 @@ class TradingEngine:
         window_minutes = self.price_window_seconds // 60
         cooldown_minutes = self.cooldown_period // 60
 
+        self.log(f"🔍 SIGNAL DETECTION CHECK at {current_time.strftime('%H:%M:%S')}")
+        self.log(f"   ⚙️  Window: {window_minutes}min, Cooldown: {cooldown_minutes}min, Threshold: {self.move_threshold:.2f}pts")
+
         # Cooldown filter
         if self.last_flagged_time is not None:
-            if (current_time - self.last_flagged_time).total_seconds() < cooldown_minutes * 60:
+            time_since_last = (current_time - self.last_flagged_time).total_seconds() / 60
+            self.log(f"   ⏰ Last signal: {time_since_last:.1f}min ago")
+            if time_since_last < cooldown_minutes:
+                self.log(f"   ❌ Cooldown active: {time_since_last:.1f}min < {cooldown_minutes}min")
                 return False
+            else:
+                self.log(f"   ✅ Cooldown expired: {time_since_last:.1f}min >= {cooldown_minutes}min")
 
         # Get window
         window_start = current_time - datetime.timedelta(minutes=window_minutes)
         window_prices = [p[1] for p in self.price_log if window_start <= p[0] <= current_time]
+        
+        self.log(f"   📊 Window: {window_start.strftime('%H:%M:%S')} to {current_time.strftime('%H:%M:%S')}")
+        self.log(f"   📈 Price log entries: {len(self.price_log)} total")
+        self.log(f"   🎯 Prices in window: {len(window_prices)} entries")
+        
         if not window_prices:
+            self.log(f"   ❌ No prices in window - insufficient data")
             return False
+        
+        # Log price range details
         high = max(window_prices)
         low = min(window_prices)
         if low == 0:
+            self.log(f"   ❌ Invalid low price: {low}")
             return False
+        
         absolute_move = high - low
+        self.log(f"   📊 Price Range: High=${high:.2f}, Low=${low:.2f}, Move=${absolute_move:.2f}pts")
+        self.log(f"   🎯 Threshold Check: {absolute_move:.2f} >= {self.move_threshold:.2f} = {absolute_move >= self.move_threshold}")
+        
         if absolute_move >= self.move_threshold:
             self.last_flagged_time = current_time
-            self.log(f"🎯 WINDOW SIGNAL: {absolute_move:.2f}pt move in {window_minutes}min window (high={high:.2f}, low={low:.2f}) [Threshold: {self.move_threshold:.2f}]")
+            self.log(f"🎯 WINDOW SIGNAL DETECTED: {absolute_move:.2f}pt move in {window_minutes}min window (high={high:.2f}, low={low:.2f}) [Threshold: {self.move_threshold:.2f}]")
             return True
-        return False
+        else:
+            self.log(f"   ❌ No signal: {absolute_move:.2f}pts < {self.move_threshold:.2f}pts threshold")
+            return False
     
     def is_market_open(self, current_time: datetime.datetime) -> bool:
         """Check if market is open"""
@@ -1136,6 +1172,10 @@ class TradingEngine:
             
             self._vix_last_fetch_time = now
             self._vix_value = vix
+            
+            old_threshold = getattr(self, 'move_threshold', None)
+            old_regime = getattr(self, '_vix_regime', None)
+            
             if vix is not None and vix > self.vix_threshold:
                 self._vix_regime = 'high_volatility'
                 self.move_threshold = self.high_vol_move_threshold
@@ -1148,4 +1188,12 @@ class TradingEngine:
                 self.premium_min = self.low_vol_premium_min
                 self.premium_max = self.low_vol_premium_max
                 self.profit_target = self.low_vol_profit_target
-            self.log(f"[VIX] Refreshed: VIX={vix}, regime={self._vix_regime}")
+            
+            # Log changes
+            if old_threshold != self.move_threshold or old_regime != self._vix_regime:
+                self.log(f"[VIX] PARAMETERS UPDATED: VIX={vix:.2f}, Regime={self._vix_regime}")
+                self.log(f"   📊 Move Threshold: {old_threshold:.2f} → {self.move_threshold:.2f}pts")
+                self.log(f"   💰 Premium Range: ${self.premium_min:.2f} - ${self.premium_max:.2f}")
+                self.log(f"   🎯 Profit Target: {self.profit_target:.2f}x")
+            else:
+                self.log(f"[VIX] Refreshed: VIX={vix:.2f}, regime={self._vix_regime} (no changes)")
