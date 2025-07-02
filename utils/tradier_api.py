@@ -59,7 +59,7 @@ def get_spy_ohlc():
     data = api.request("/markets/quotes", params={"symbols": "SPY"})
     quote = data.get("quotes", {}).get("quote", {})
 
-    if quote is None:
+    if quote.get("open", 0.0) is None:
         return None
     
     # Extract OHLC data from Tradier quote
@@ -156,14 +156,12 @@ def test_connection():
         # Test getting SPY price
         print("\nTesting SPY Price...")
         ohlc = get_spy_ohlc()
-        print(f"Currently SPY price isn't available")
-
         if ohlc is None:
+            print(f"SPY price data is currently unavailable")
             return True
-
-        spy_price = ohlc['close']
-
-        print(f"Current SPY Price: ${spy_price:.2f}")
+        elif:
+            spy_price = ohlc['close']
+            print(f"Current SPY Price: ${spy_price:.2f}")
         
         return True
     
