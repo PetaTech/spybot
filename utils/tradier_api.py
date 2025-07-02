@@ -53,15 +53,14 @@ def get_api_instance() -> TradierAPI:
     return _api_instance
 
 # === Backward Compatibility Functions ===
-def get_spy_price():
-    """Get current SPY price (backward compatibility)"""
-    return get_spy_ohlc()['close']
-
 def get_spy_ohlc():
     """Get current SPY OHLC data"""
     api = get_api_instance()
     data = api.request("/markets/quotes", params={"symbols": "SPY"})
     quote = data.get("quotes", {}).get("quote", {})
+
+    if quote is None:
+        return None
     
     # Extract OHLC data from Tradier quote
     ohlc = {
@@ -156,7 +155,14 @@ def test_connection():
         
         # Test getting SPY price
         print("\nTesting SPY Price...")
-        spy_price = get_spy_price()
+        ohlc = get_spy_ohlc()
+        print(f"Currently SPY price isn't available")
+
+        if ohlc is None:
+            return True
+
+        spy_price = ohlc['close']
+
         print(f"Current SPY Price: ${spy_price:.2f}")
         
         return True

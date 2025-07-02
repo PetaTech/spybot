@@ -33,6 +33,11 @@ class PaperDataProvider(DataProvider):
                 now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
                 ohlc = get_spy_ohlc()
                 
+                # Skip if ohlc is None
+                if ohlc is None:
+                    time.sleep(60)
+                    continue
+                
                 # Create market row with real OHLC data
                 row = {
                     'current_time': now,
