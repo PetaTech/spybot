@@ -122,11 +122,11 @@ def main():
     print(f"\n🕐 Current Time (NY): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print(f"📈 Market Hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
     
-    if not (market_open <= now.time() <= market_close):
+    while not (market_open <= now.time() <= market_close):
         print("❌ Market is currently CLOSED. Live trading will not detect signals.")
-        print("💡 Try running during market hours (9:30 AM - 4:00 PM EDT)")
-        return
-    
+        print("💡 Waiting for market to open (9:30 AM - 4:00 PM EDT)...")
+        time.sleep(60)
+        now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
     print("✅ Market is OPEN. Starting live trading...")
     
     # Create data provider and config
