@@ -159,7 +159,7 @@ def test_connection():
         if ohlc is None:
             print(f"SPY price data is currently unavailable")
             return True
-        elif:
+        else:
             spy_price = ohlc['close']
             print(f"Current SPY Price: ${spy_price:.2f}")
         
