@@ -14,7 +14,12 @@ import time
 import os
 from dateutil import tz
 from utils import fetch_current_vix, fetch_vix_at_datetime
-
+import requests
+import urllib.parse
+import calendar
+import json
+import pytz
+from zoneinfo import ZoneInfo
 
 @dataclass
 class Position:
@@ -144,6 +149,7 @@ class TradingEngine:
         """
         # Dependencies
         self.data_provider = data_provider
+        self.config = config # Store config for backtest mode
         
         # Create appropriate order executor based on mode
         if mode == "backtest":
@@ -308,40 +314,14 @@ class TradingEngine:
             market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
-        # Skip processing during buffer periods
-        if time_since_open < self.market_open_buffer_minutes:
-            self.log(f"⏰ SKIPPING: Market open buffer period (+{time_since_open:.1f}min < {self.market_open_buffer_minutes}min)")
-            return {
-                'timestamp': current_time,
-                'action': 'skipped',
-                'symbol': symbol,
-                'price': close,
-                'move_percent': 0.0,
-                'signal_detected': False,
-                'trades_active': len(self.active_trades),
-                'entry_cost': 0.0,
-                'exit_value': 0.0,
-                'pnl': 0.0,
-                'positions': None,
-                'error': f'Market open buffer: {time_since_open:.1f}min < {self.market_open_buffer_minutes}min'
-            }
+        # Check if we're in buffer periods (for entry blocking)
+        in_open_buffer = time_since_open < self.market_open_buffer_minutes
+        in_close_buffer = time_until_close < self.market_close_buffer_minutes
         
-        if time_until_close < self.market_close_buffer_minutes:
-            self.log(f"⏰ SKIPPING: Market close buffer period (-{time_until_close:.1f}min < {self.market_close_buffer_minutes}min)")
-            return {
-                'timestamp': current_time,
-                'action': 'skipped',
-                'symbol': symbol,
-                'price': close,
-                'move_percent': 0.0,
-                'signal_detected': False,
-                'trades_active': len(self.active_trades),
-                'entry_cost': 0.0,
-                'exit_value': 0.0,
-                'pnl': 0.0,
-                'positions': None,
-                'error': f'Market close buffer: {time_until_close:.1f}min < {self.market_close_buffer_minutes}min'
-            }
+        if in_open_buffer:
+            self.log(f"⏰ MARKET OPEN BUFFER: +{time_since_open:.1f}min < {self.market_open_buffer_minutes}min")
+        if in_close_buffer:
+            self.log(f"⏰ MARKET CLOSE BUFFER: -{time_until_close:.1f}min < {self.market_close_buffer_minutes}min")
         
         # Store current time for options queries
         self.last_processed_time = current_time
@@ -384,7 +364,7 @@ class TradingEngine:
         
         print(f"[ENGINE DEBUG] Move calculation: {move_percent:.2f}% ({absolute_move:.2f} points)")
         
-        # Check for exits on all active trades
+        # ALWAYS check for exits on all active trades (even during buffer periods)
         if self.active_trades:
             print(f"[ENGINE DEBUG] Checking exits for {len(self.active_trades)} active trades")
             trades_to_exit = self.check_all_exit_conditions(market_row.current_time)
@@ -442,62 +422,71 @@ class TradingEngine:
                     result['error'] = 'No expiration date stored'
                     self.log(f"❌ EXIT FAILED: {result['error']}")
         
-        # Check for new entry signals
-        print(f"[ENGINE DEBUG] Checking for entry signals...")
-        if self.should_detect_signal(market_row.current_time):
-            result['signal_detected'] = True
-            self.total_signals += 1
-            self.log(f"🎯 SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
-            
-            # Check entry conditions
-            self.log(f"🔍 Checking entry conditions...")
-            if self.is_entry_allowed(market_row.current_time):
-                if not self.check_daily_limits(market_row.current_time):
-                    result['action'] = 'signal_skipped'
-                    result['error'] = 'Daily limits reached'
-                    self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
-                else:
-                    self.log(f"🚀 ENTRY SIGNAL APPROVED! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
-                    expiration = market_row.current_time.strftime("%Y-%m-%d")
-                    # Diagnostic logging for options loading
-                    self.log(f"[DIAG] Requesting option chain for time: {market_row.current_time}, expiration: {expiration}")
-                    print(f"[ENGINE DEBUG] About to call find_valid_options for price ${close:.2f}, expiration {expiration}")
-                    positions = self.find_valid_options(market_row.close, expiration)
-                    print(f"[ENGINE DEBUG] find_valid_options returned {len(positions)} positions")
-                    if len(positions) == 2:
-                        # Execute entry
-                        if self.execute_entry(positions, expiration):
-                            self.active_trades.append(positions)
-                            self.trade_entry_times.append(market_row.current_time)
-                            self.last_trade_time = market_row.current_time
-                            
-                            entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in positions)
-                            entry_commission = self.calculate_total_trade_cost(positions, is_exit=False)
-                            total_entry_cost = entry_cost + entry_commission
-                            
-                            result['action'] = 'entry'
-                            result['positions'] = positions.copy()
-                            result['entry_cost'] = entry_cost
-                            result['entry_commission'] = entry_commission
-                            result['total_entry_cost'] = total_entry_cost
-                            
-                            self.increment_daily_trades()
-                            self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
-                            self.log_comprehensive_result(result)
-                        else:
-                            result['action'] = 'entry_failed'
-                            result['error'] = 'Entry execution failed'
-                            self.log(f"❌ ENTRY FAILED: {result['error']}")
-                    else:
+        # Only check for new entry signals if NOT in buffer periods
+        if not in_open_buffer and not in_close_buffer:
+            print(f"[ENGINE DEBUG] Checking for entry signals...")
+            if self.should_detect_signal(market_row.current_time):
+                result['signal_detected'] = True
+                self.total_signals += 1
+                self.log(f"🎯 SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                
+                # Check entry conditions
+                self.log(f"🔍 Checking entry conditions...")
+                if self.is_entry_allowed(market_row.current_time):
+                    if not self.check_daily_limits(market_row.current_time):
                         result['action'] = 'signal_skipped'
-                        result['error'] = f'Only {len(positions)} valid options found (need 2)'
+                        result['error'] = 'Daily limits reached'
                         self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                    else:
+                        self.log(f"🚀 ENTRY SIGNAL APPROVED! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                        expiration = market_row.current_time.strftime("%Y-%m-%d")
+                        # Diagnostic logging for options loading
+                        self.log(f"[DIAG] Requesting option chain for time: {market_row.current_time}, expiration: {expiration}")
+                        print(f"[ENGINE DEBUG] About to call find_valid_options for price ${close:.2f}, expiration {expiration}")
+                        positions = self.find_valid_options(market_row.close, expiration, market_row.current_time)
+                        print(f"[ENGINE DEBUG] find_valid_options returned {len(positions)} positions")
+                        if len(positions) == 2:
+                            # Execute entry
+                            if self.execute_entry(positions, expiration):
+                                self.active_trades.append(positions)
+                                self.trade_entry_times.append(market_row.current_time)
+                                self.last_trade_time = market_row.current_time
+                                
+                                entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in positions)
+                                entry_commission = self.calculate_total_trade_cost(positions, is_exit=False)
+                                total_entry_cost = entry_cost + entry_commission
+                                
+                                result['action'] = 'entry'
+                                result['positions'] = positions.copy()
+                                result['entry_cost'] = entry_cost
+                                result['entry_commission'] = entry_commission
+                                result['total_entry_cost'] = total_entry_cost
+                                
+                                self.increment_daily_trades()
+                                self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
+                                self.log_comprehensive_result(result)
+                            else:
+                                result['action'] = 'entry_failed'
+                                result['error'] = 'Entry execution failed'
+                                self.log(f"❌ ENTRY FAILED: {result['error']}")
+                        else:
+                            result['action'] = 'signal_skipped'
+                            result['error'] = f'Only {len(positions)} valid options found (need 2)'
+                            self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                else:
+                    result['action'] = 'signal_skipped'
+                    result['error'] = 'Entry not allowed (market timing/cooldown)'
+                    self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
             else:
-                result['action'] = 'signal_skipped'
-                result['error'] = 'Entry not allowed (market timing/cooldown)'
-                self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                self.log(f"   ❌ No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
         else:
-            self.log(f"   ❌ No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
+            # In buffer period - skip entry but log the reason
+            if in_open_buffer:
+                result['action'] = 'skipped'
+                result['error'] = f'Market open buffer: {time_since_open:.1f}min < {self.market_open_buffer_minutes}min'
+            elif in_close_buffer:
+                result['action'] = 'skipped'
+                result['error'] = f'Market close buffer: {time_until_close:.1f}min < {self.market_close_buffer_minutes}min'
         
         # Log overall performance periodically (every 5 trades or when significant events occur)
         if self.total_trades % 5 == 0 and self.total_trades > 0:
@@ -683,9 +672,10 @@ class TradingEngine:
         
         return True
     
-    def find_valid_options(self, price: float, expiration: str) -> List[Position]:
-        """Find valid near-the-money call and put options within the VIX-based premium range."""
-        print(f"[ENGINE DEBUG] find_valid_options called with price=${price:.2f}, expiration={expiration}")
+    def find_valid_options(self, price: float, expiration: str, current_time: datetime.datetime) -> List[Position]:
+        if self.mode == "backtest":
+            return self.find_valid_options_backtest(price, expiration, current_time)
+        # Original logic for live/paper
         if not self.data_provider:
             print("[ENGINE DEBUG] No data provider available")
             return []
@@ -693,7 +683,6 @@ class TradingEngine:
         for attempt in range(1, self.max_retries + 1):
             self.log(f"[Attempt {attempt}] Fetching option chain...")
             try:
-                current_time = getattr(self, 'last_processed_time', None)
                 if not current_time:
                     return []
                 df_chain = self.data_provider.get_option_chain("SPY", expiration, current_time)
@@ -736,6 +725,195 @@ class TradingEngine:
             if attempt < self.max_retries and self.retry_delay > 0:
                 time.sleep(self.retry_delay)
         return positions
+    
+    def find_valid_options_backtest(self, price: float, expiration: str, current_time: datetime.datetime) -> list:
+        """Backtest-optimized: Use Polygon minute-level OHLC endpoint for option prices at signal time, with pagination support."""
+        print(f"[ENGINE DEBUG] find_valid_options_backtest called with price=${price:.2f}, expiration={expiration}")
+        positions = []
+        signal_time = current_time
+        self.log(f"=================={signal_time}")
+
+        # Ensure signal_time is timezone-aware UTC
+        if signal_time.tzinfo is None:
+            signal_time = signal_time.replace(tzinfo=ZoneInfo("America/New_York"))
+
+        self.log(f"qqqqqqqqqqqqqqqqqqqqqqqq{signal_time}")
+
+        # Convert to Unix millisecond timestamp
+        signal_ts = int(signal_time.timestamp() * 1000)
+        self.log(f"[=========] signal_time: {signal_time} (tzinfo={signal_time.tzinfo}), signal_ts: {signal_ts}")
+
+        for attempt in range(1, self.max_retries + 1):
+            self.log(f"[Attempt {attempt}] Fetching option contracts from file...")
+            try:
+                # 1. Load contracts file (OPT_PATH)
+                opt_path = self.config.get('OPT_PATH')
+                contracts_df = pd.read_parquet(opt_path)
+                # 2. Filter for date/expiration
+                contracts_df = contracts_df[(contracts_df['date'] == expiration) & (contracts_df['expiration_date'] == expiration) & (contracts_df['underlying_ticker'] == 'SPY')]
+                if contracts_df.empty:
+                    self.log("[ERROR] No contracts found for date/expiration.")
+                    continue
+                # 3. For each side (call/put), select ATM contracts
+                for option_type, contract_type in [('C', 'call'), ('P', 'put')]:
+                    df_side = contracts_df[contracts_df['contract_type'] == contract_type]
+                    if df_side.empty:
+                        self.log(f"[WARN] No contracts for {contract_type} side.")
+                        continue
+                    # Find ATM strike
+                    df_side['strike_diff'] = (df_side['strike_price'] - price).abs()
+                    df_side = df_side.sort_values('strike_diff')
+                    # Only consider top 5 closest strikes
+                    for _, row in df_side.head(5).iterrows():
+                        ticker = row['ticker']
+                        strike = row['strike_price']
+                        self.log(f"[CONTRACT] Considering {ticker} (strike={strike}, type={option_type})")
+                        # 4. Fetch minute OHLC for this contract for the backtest date, with pagination
+                        api_key = self.config.get('POLYGON_API_KEY', '')
+                        date_str = signal_time.strftime('%Y-%m-%d')
+                        base_url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}"
+                        params = {
+                            "adjusted": "true",
+                            "sort": "asc",
+                            "limit": 50000,
+                            "apiKey": api_key
+                        }
+                        all_bars = []
+                        next_url = None
+                        page_count = 1
+                        for ohlc_attempt in range(3):
+                            try:
+                                self.log(f"[PAGINATION] Start fetching minute bars for {ticker} on {date_str}")
+                                while True:
+                                    if next_url:
+                                        # Ensure apiKey is present in next_url
+                                        parsed = urllib.parse.urlparse(next_url)
+                                        query = dict(urllib.parse.parse_qsl(parsed.query))
+                                        if 'apiKey' not in query:
+                                            query['apiKey'] = api_key
+                                            next_url = parsed._replace(query=urllib.parse.urlencode(query)).geturl()
+                                        self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {next_url}")
+                                        resp = requests.get(next_url)
+                                        # Log request URL and response JSON to file
+                                        try:
+                                            with open('polygon_responses.json', 'a') as f:
+                                                f.write(f'request url: {next_url}\n')
+                                                f.write('response: ')
+                                                json.dump(resp.json(), f)
+                                                f.write('\n')
+                                        except Exception as log_exc:
+                                            self.log(f"[LOG ERROR] Could not log Polygon response: {log_exc}")
+                                    else:
+                                        self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {base_url}")
+                                        resp = requests.get(base_url, params=params)
+                                        # Log request URL and response JSON to file
+                                        try:
+                                            full_url = resp.url if hasattr(resp, 'url') else base_url
+                                            with open('polygon_responses.json', 'a') as f:
+                                                f.write(f'request url: {full_url}\n')
+                                                f.write('response: ')
+                                                json.dump(resp.json(), f)
+                                                f.write('\n')
+                                        except Exception as log_exc:
+                                            self.log(f"[LOG ERROR] Could not log Polygon response: {log_exc}")
+                                    if resp.status_code == 429:
+                                        self.log(f"[RATE LIMIT] Hit Polygon rate limit, sleeping 15s...")
+                                        time.sleep(15)
+                                        continue
+                                    elif resp.status_code != 200:
+                                        self.log(f"[ERROR] Polygon minute OHLC error for {ticker}: {resp.status_code} {resp.text}")
+                                        break
+                                    data = resp.json()
+                                    if 'results' in data and data['results']:
+                                        all_bars.extend(data['results'])
+                                    next_url = data.get('next_url')
+                                    if not next_url:
+                                        break
+                                    page_count += 1
+                                    time.sleep(0.05)
+                                self.log(f"[PAGINATION] Done fetching minute bars for {ticker}. Total bars: {len(all_bars)}")
+                                if not all_bars:
+                                    self.log(f"[NO DATA] No minute OHLC data for {ticker} on {date_str}")
+                                    break
+                                # Find the bar with timestamp <= signal_ts, closest to signal_ts
+                                if all_bars:
+                                    min_bar_ts = min(bar['t'] for bar in all_bars)
+                                    max_bar_ts = max(bar['t'] for bar in all_bars)
+                                else:
+                                    min_bar_ts = max_bar_ts = None
+                                bars_before = [bar for bar in all_bars if bar['t'] <= signal_ts]
+                                if not bars_before:
+                                    self.log(f"[NO BAR] No minute bar before or at signal time for {ticker}. signal_ts={signal_ts}, earliest={min_bar_ts}, latest={max_bar_ts}")
+                                    break
+                                best_bar = max(bars_before, key=lambda bar: bar['t'])
+                                option_price = best_bar.get('c')
+                                if option_price is None:
+                                    self.log(f"[NO PRICE] No close price for {ticker} at {best_bar['t']}")
+                                    break
+                                self.log(f"[SELECTED] {ticker} selected bar: ts={best_bar['t']} close={option_price}")
+                                pos = {
+                                    'option_type': option_type,
+                                    'strike': strike,
+                                    'bid': option_price,  # Use close as both bid/ask for now
+                                    'ask': option_price,
+                                    'expiration_date': expiration,
+                                    'ticker': ticker,
+                                    'contract_type': contract_type
+                                }
+                                positions.append(pos)
+                                self.log(f"[OHLC] {ticker} {date_str} minute={best_bar['t']} close={option_price}")
+                                break
+                            except Exception as e:
+                                self.log(f"[EXCEPTION] Error fetching minute OHLC for {ticker}: {e}")
+                                time.sleep(1)
+                        time.sleep(0.05)  # Throttle requests
+                # After collecting all candidate positions, pick the best call and best put
+                best_call = None
+                best_put = None
+                call_candidates = [p for p in positions if p['option_type'] == 'C']
+                put_candidates = [p for p in positions if p['option_type'] == 'P']
+                if call_candidates:
+                    best_call = min(call_candidates, key=lambda p: abs(p['strike'] - price))
+                if put_candidates:
+                    best_put = min(put_candidates, key=lambda p: abs(p['strike'] - price))
+                final_positions = []
+                if best_call:
+                    from core.trading_engine import Position
+                    final_positions.append(Position(
+                        type=best_call['option_type'],
+                        strike=best_call['strike'],
+                        entry_price=best_call['ask'],
+                        contracts=1,  # or use your logic for contracts
+                        target=best_call['ask'],  # or your logic for target
+                        symbol='SPY',
+                        expiration_date=best_call['expiration_date'],
+                        entry_time=None
+                    ))
+                if best_put:
+                    from core.trading_engine import Position
+                    final_positions.append(Position(
+                        type=best_put['option_type'],
+                        strike=best_put['strike'],
+                        entry_price=best_put['ask'],
+                        contracts=1,  # or use your logic for contracts
+                        target=best_put['ask'],  # or your logic for target
+                        symbol='SPY',
+                        expiration_date=best_put['expiration_date'],
+                        entry_time=None
+                    ))
+                if len(final_positions) == 2:
+                    return final_positions
+                else:
+                    self.log(f"[WARN] Only found {len(final_positions)} valid options (call/put), retrying...")
+                    positions = []
+                    # If we didn't find a bar, increment signal_time for the next attempt
+                    signal_time = signal_time + datetime.timedelta(minutes=1)
+                    signal_ts = int(signal_time.timestamp() * 1000)
+                    time.sleep(self.retry_delay)
+            except Exception as e:
+                self.log(f"[ERROR] Backtest option selection failed: {e}")
+                time.sleep(self.retry_delay)
+        return []
     
     def execute_entry(self, positions: List[Position], expiration: str) -> bool:
         """Execute entry orders"""
@@ -848,7 +1026,7 @@ class TradingEngine:
     def update_daily_pnl(self, trade_pnl: float):
         """Update daily PnL"""
         self.daily_pnl += trade_pnl
-        self.log(f"📊 Daily PnL: ${self.daily_pnl:.2f}")
+        self.log(f"📊 Daily P&L: ${self.daily_pnl:.2f}")
     
     def update_trade_metrics(self, trade_pnl: float):
         """Update overall trade metrics"""
@@ -1162,8 +1340,12 @@ class TradingEngine:
     def _set_vix_parameters(self, force=False, target_datetime=None):
         now = time.time()
         if force or (now - self._vix_last_fetch_time > 300):  # 5 min cache
+            # Use static VIX for backtesting if enabled
+            if self.mode == "backtest" and getattr(self, 'config', None) and self.config.get('STATIC_VIX_MODE', False):
+                vix = self.config.get('STATIC_VIX_VALUE', 20.0)
+                self.log(f"[VIX] Backtest mode: Using STATIC VIX value {vix}")
             # Use historical VIX for backtesting, current VIX for live/paper
-            if self.mode == "backtest" and target_datetime:
+            elif self.mode == "backtest" and target_datetime:
                 vix = fetch_vix_at_datetime(target_datetime)
                 self.log(f"[VIX] Backtest mode: Fetching VIX for {target_datetime}")
             else:

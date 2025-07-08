@@ -12,82 +12,48 @@ from typing import Optional, Iterator, Dict
 from core.trading_engine import TradingEngine, DataProvider
 from config.backtest_single import *
 import duckdb
+from config.polygon import POLYGON_API_KEY
 
-
-def ensure_parquet_exists(csv_path: str) -> str:
-    """
-    Ensure a Parquet version of the given CSV exists. If not, convert it using DuckDB (no pandas in memory).
-    Returns the Parquet file path.
-    """
-    csv_path = Path(csv_path)
-    parquet_path = csv_path.with_suffix('.parquet')
-    if parquet_path.exists():
-        print(f"[PARQUET] Found existing Parquet file: {parquet_path}")
-        return str(parquet_path)
-    print(f"[PARQUET] Parquet file not found for {csv_path}. Converting CSV to Parquet using DuckDB...")
-    try:
-        # Use DuckDB to convert CSV to Parquet without loading into pandas
-        duckdb.query(f"""
-            COPY (SELECT * FROM read_csv_auto('{csv_path}', HEADER=TRUE, SAMPLE_SIZE=10000, ALL_VARCHAR=FALSE))
-            TO '{parquet_path}' (FORMAT 'parquet');
-        """)
-        print(f"[PARQUET] Converted {csv_path} to {parquet_path} successfully!")
-        return str(parquet_path)
-    except Exception as e:
-        print(f"[PARQUET] Failed to convert {csv_path} to Parquet: {e}")
-        raise
-
+# Remove ensure_parquet_exists and all CSV handling
 
 class BacktestDataProvider(DataProvider):
-    """Backtest data provider that streams historical CSV data rows"""
+    """Backtest data provider that streams historical Parquet data rows"""
     
     def __init__(self, spy_file: str, options_file: str):
         self.spy_file = spy_file
         self.options_file = options_file
         self.current_index = 0
         
-        # Ensure Parquet version of options file exists
-        self.options_parquet = ensure_parquet_exists(self.options_file)
-        # Ensure Parquet version of SPY file exists (for streaming)
-        self.spy_parquet = ensure_parquet_exists(self.spy_file)
+        # Assume Parquet files are provided directly
+        self.options_parquet = self.options_file
+        self.spy_parquet = self.spy_file
         
         # Prepare DuckDB connection for streaming
         self.duckdb_conn = duckdb.connect(database=':memory:')
-        self.spy_stream = self.duckdb_conn.execute(f"SELECT * FROM read_parquet('{self.spy_parquet}') ORDER BY quote_datetime ASC").fetchdf().itertuples(index=False)
+        self.spy_stream = self.duckdb_conn.execute(f"SELECT * FROM read_parquet('{self.spy_parquet}') ORDER BY datetime ASC").fetchdf().itertuples(index=False)
         print(f"[DEBUG] SPY Parquet streaming ready: {self.spy_parquet}")
-    
-    def _load_spy_data(self):
-        pass  # No longer used
     
     def stream(self) -> Iterator[Dict]:
         """Stream market data rows one at a time using DuckDB (no pandas in memory)"""
+        import pandas as pd
         print(f"[DEBUG] Starting data stream from Parquet: {self.spy_parquet}")
         for idx, row in enumerate(self.spy_stream):
             if idx % 100 == 0:
-                print(f"[DEBUG] Processing SPY row {idx}: {row.quote_datetime}")
-            # Ensure current_time is always a datetime object
-            current_time = row.quote_datetime
-            if isinstance(current_time, str):
-                try:
-                    # Try parsing common formats
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M"):
-                        try:
-                            current_time = datetime.datetime.strptime(current_time, fmt)
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        raise ValueError(f"Unrecognized datetime format: {row.quote_datetime}")
-                except Exception as e:
-                    print(f"[DEBUG] Failed to parse quote_datetime: {row.quote_datetime}, error: {e}")
-                    raise
+                print(f"[DEBUG] Processing SPY row {idx}: {row.datetime}")
+            # Handle both int (ms since epoch) and pandas.Timestamp
+            if isinstance(row.datetime, (int, float)):
+                current_time = datetime.datetime.utcfromtimestamp(row.datetime / 1000)
+            elif hasattr(row.datetime, 'to_pydatetime'):
+                current_time = row.datetime.to_pydatetime()
+            else:
+                current_time = row.datetime  # fallback, may already be datetime
             yield {
                 'current_time': current_time,
                 'open': row.open,
                 'high': row.high,
                 'low': row.low,
                 'close': row.close,
-                'volume': row.trade_volume,
+                'volume': row.volume,
                 'symbol': 'SPY'
             }
     
@@ -100,32 +66,31 @@ class BacktestDataProvider(DataProvider):
         if current_time is None:
             print(f"[DEBUG] No current_time provided, cannot query options data")
             return pd.DataFrame()
-        time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+        # Match on date (YYYY-MM-DD)
+        date_str = current_time.strftime('%Y-%m-%d')
         query = f"""
-            SELECT * FROM read_parquet('{self.options_parquet}')
-            WHERE underlying_symbol = '{symbol}'
-            AND quote_datetime = '{time_str}'
+            SELECT *,
+                CASE contract_type WHEN 'call' THEN 'C' WHEN 'put' THEN 'P' ELSE NULL END AS option_type,
+                strike_price AS strike,
+                1.0 AS bid, 1.1 AS ask -- Dummy values for now
+            FROM read_parquet('{self.options_parquet}')
+            WHERE underlying_ticker = '{symbol}'
+            AND date = '{date_str}'
+            AND expiration_date = '{expiration_date}'
         """
         print(f"[DEBUG] Executing DuckDB query (Parquet): {query}")
         try:
             result_df = duckdb.query(query).to_df()
             print(f"[DEBUG] DuckDB query returned {len(result_df)} rows")
             if result_df.empty:
-                print(f"[DEBUG] No data returned from DuckDB query for time {time_str}")
+                print(f"[DEBUG] No data returned from DuckDB query for date {date_str}")
                 return result_df
-            try:
-                exp_date = datetime.datetime.strptime(expiration_date, '%Y-%m-%d')
-                exp_formats = [exp_date.strftime('%m/%d/%Y'), expiration_date]
-            except:
-                exp_formats = [expiration_date]
-            print(f"[DEBUG] Filtering for expiration formats: {exp_formats}")
-            mask = result_df['expiration'].isin(exp_formats)
-            filtered_df = result_df[mask]
-            print(f"[DEBUG] After expiration filtering: {len(filtered_df)} rows")
-            if not filtered_df.empty:
-                print(f"[DEBUG] Option chain columns: {list(filtered_df.columns)}")
-                print(f"[DEBUG] Sample option data: {filtered_df.head(1).to_dict('records')}")
-            return filtered_df
+            # Only keep columns expected by engine
+            keep_cols = ['option_type', 'strike', 'bid', 'ask', 'expiration_date', 'ticker', 'contract_type']
+            for col in keep_cols:
+                if col not in result_df.columns:
+                    result_df[col] = None
+            return result_df[keep_cols]
         except Exception as e:
             print(f"[DEBUG] DuckDB query failed: {e}")
             return pd.DataFrame()
@@ -168,7 +133,12 @@ def create_config() -> dict:
         'MARKET_CLOSE_BUFFER_MINUTES': MARKET_CLOSE_BUFFER_MINUTES,
         'EARLY_SIGNAL_COOLDOWN_MINUTES': EARLY_SIGNAL_COOLDOWN_MINUTES,
         'LOG_DIR': 'logs',
-        'MODE': 'backtest'
+        'MODE': 'backtest',
+        # Static VIX config
+        'STATIC_VIX_MODE': STATIC_VIX_MODE,
+        'STATIC_VIX_VALUE': STATIC_VIX_VALUE,
+        'OPT_PATH': OPT_PATH,
+        'POLYGON_API_KEY': POLYGON_API_KEY,
     }
 
 
@@ -237,11 +207,6 @@ def run_backtest(config: dict = None, spy_file: str = None, options_file: str = 
                 volume=row['volume']
             )
             print(f"[DEBUG] Row {row_count} result: {result['action']}")
-            
-            # Add a safety check to prevent infinite loops
-            if row_count > 10000:  # Safety limit
-                print("[DEBUG] Safety limit reached, stopping backtest")
-                break
                 
     except KeyboardInterrupt:
         print("Backtest interrupted by user (Ctrl+C)")

@@ -7,10 +7,8 @@ Settings for historical backtesting
 from .strategy import *
 
 # === Data Configuration ===
-BASE_DIR = "."  # Current directory
-REPLAY_DATE = "2025-05-30"
-SPY_PATH = f"{BASE_DIR}/data/spy/UnderlyingIntervals_60sec_{REPLAY_DATE}.csv"
-OPT_PATH = f"{BASE_DIR}/data/options_greeks/UnderlyingOptionsIntervals_60sec_calcs_oi_{REPLAY_DATE}.csv"
+SPY_PATH = f"./data/spy_data_2025-05-30_2025-05-30_1min.parquet"
+OPT_PATH = f"./data/spy_options_0dte_contracts_2025-05-30_2025-05-30_1min.parquet"
 
 # === Backtest Specific Settings ===
 INITIAL_CAPITAL = 12000
@@ -21,6 +19,10 @@ SLIPPAGE = 0.01  # 1 cent slippage per option
 # Override retry settings for faster backtesting
 MAX_RETRIES = 6  # Same as live/paper modes
 RETRY_DELAY = 0  # No delay for faster backtesting (overrides strategy.py)
+
+# === VIX Static Mode for Backtest ===
+STATIC_VIX_MODE = True  # If True, use STATIC_VIX_VALUE for VIX in backtest
+STATIC_VIX_VALUE = 20.0  # Static VIX value to use when STATIC_VIX_MODE is enabled
 
 # === Logging ===
 LOG_LEVEL = 'INFO'
