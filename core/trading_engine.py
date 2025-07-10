@@ -731,13 +731,10 @@ class TradingEngine:
         print(f"[ENGINE DEBUG] find_valid_options_backtest called with price=${price:.2f}, expiration={expiration}")
         positions = []
         signal_time = current_time
-        self.log(f"=================={signal_time}")
 
         # Ensure signal_time is timezone-aware UTC
         if signal_time.tzinfo is None:
             signal_time = signal_time.replace(tzinfo=ZoneInfo("America/New_York"))
-
-        self.log(f"qqqqqqqqqqqqqqqqqqqqqqqq{signal_time}")
 
         # Convert to Unix millisecond timestamp
         signal_ts = int(signal_time.timestamp() * 1000)
@@ -794,15 +791,6 @@ class TradingEngine:
                                             next_url = parsed._replace(query=urllib.parse.urlencode(query)).geturl()
                                         self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {next_url}")
                                         resp = requests.get(next_url)
-                                        # Log request URL and response JSON to file
-                                        try:
-                                            with open('polygon_responses.json', 'a') as f:
-                                                f.write(f'request url: {next_url}\n')
-                                                f.write('response: ')
-                                                json.dump(resp.json(), f)
-                                                f.write('\n')
-                                        except Exception as log_exc:
-                                            self.log(f"[LOG ERROR] Could not log Polygon response: {log_exc}")
                                     else:
                                         self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {base_url}")
                                         resp = requests.get(base_url, params=params)
