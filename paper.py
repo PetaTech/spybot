@@ -61,7 +61,7 @@ class PaperDataProvider(DataProvider):
                 print(f"Error getting data: {e}")
                 time.sleep(60)
     
-    def get_option_chain(self, symbol: str, expiration_date: str) -> pd.DataFrame:
+    def get_option_chain(self, symbol: str, expiration_date: str, current_time=None) -> pd.DataFrame:
         """Get option chain from sandbox API"""
         return get_option_chain(symbol, expiration_date)
 
