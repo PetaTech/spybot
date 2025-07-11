@@ -423,6 +423,18 @@ class TradingEngine:
                         
                         # Log comprehensive exit result
                         self.log_comprehensive_result(result)
+                        # Update analytics log for forced exit
+                        trade_id = None
+                        if trade_positions and hasattr(trade_positions[0], 'trade_id'):
+                            trade_id = getattr(trade_positions[0], 'trade_id', None)
+                        if trade_id is not None:
+                            for entry in reversed(self.signal_trade_log):
+                                if entry.get('trade_id') == trade_id and entry.get('exit_time') is None:
+                                    entry['exit_time'] = market_row.current_time
+                                    entry['exit_value'] = result.get('exit_value') if 'exit_value' in result else None
+                                    entry['exit_commission'] = result.get('exit_commission') if 'exit_commission' in result else None
+                                    entry['pnl'] = result.get('pnl') if 'pnl' in result else None
+                                    entry['exit_reason'] = 'market close'
                     else:
                         result['action'] = 'exit_failed'
                         result['error'] = 'Exit execution failed'
