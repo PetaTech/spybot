@@ -1338,8 +1338,8 @@ class TradingEngine:
         if self.total_trades > 0:
             # Fix win rate calculation: only use closed trades
             closed_trades = [entry for entry in self.signal_trade_log if entry.get('exit_time')]
-            num_wins = sum(1 for entry in closed_trades if entry.get('pnl', 0) > 0)
-            num_losses = sum(1 for entry in closed_trades if entry.get('pnl', 0) <= 0)
+            num_wins = sum(1 for entry in closed_trades if entry.get('pnl') is not None and entry.get('pnl') > 0)
+            num_losses = sum(1 for entry in closed_trades if entry.get('pnl') is not None and entry.get('pnl') <= 0)
             win_rate = (num_wins / (num_wins + num_losses) * 100) if (num_wins + num_losses) > 0 else 0.0
             # Print correct win rate and trade counts in summary
             self.log(f"📈 Win Rate: {win_rate:.1f}%")
