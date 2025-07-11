@@ -794,16 +794,6 @@ class TradingEngine:
                                     else:
                                         self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {base_url}")
                                         resp = requests.get(base_url, params=params)
-                                        # Log request URL and response JSON to file
-                                        try:
-                                            full_url = resp.url if hasattr(resp, 'url') else base_url
-                                            with open('polygon_responses.json', 'a') as f:
-                                                f.write(f'request url: {full_url}\n')
-                                                f.write('response: ')
-                                                json.dump(resp.json(), f)
-                                                f.write('\n')
-                                        except Exception as log_exc:
-                                            self.log(f"[LOG ERROR] Could not log Polygon response: {log_exc}")
                                     if resp.status_code == 429:
                                         self.log(f"[RATE LIMIT] Hit Polygon rate limit, sleeping 15s...")
                                         time.sleep(15)
