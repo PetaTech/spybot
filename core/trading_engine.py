@@ -586,7 +586,7 @@ class TradingEngine:
             if self.signal_trade_log:
                 last_open = None
                 for entry in reversed(self.signal_trade_log):
-                    if entry['exit_time'] is None:
+                    if entry.get('exit_time') is None:
                         last_open = entry
                         break
                 if last_open is not None:
@@ -1326,13 +1326,13 @@ class TradingEngine:
                     self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
                     self.log(f"  P&L: ${entry.get('pnl', '')}")
                     try:
-                        from datetime import datetime
+                        import datetime
                         entry_time_dt = entry.get('entry_time')
                         exit_time_dt = entry.get('exit_time')
                         if isinstance(entry_time_dt, str):
-                            entry_time_dt = datetime.fromisoformat(str(entry_time_dt))
+                            entry_time_dt = datetime.datetime.fromisoformat(str(entry_time_dt))
                         if isinstance(exit_time_dt, str):
-                            exit_time_dt = datetime.fromisoformat(str(exit_time_dt))
+                            exit_time_dt = datetime.datetime.fromisoformat(str(exit_time_dt))
                         holding = exit_time_dt - entry_time_dt
                         self.log(f"  Holding Time: {holding}")
                     except Exception:
