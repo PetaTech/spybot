@@ -415,6 +415,15 @@ class TradingEngine:
                         self.update_daily_pnl(trade_pnl)
                         self.update_trade_metrics(trade_pnl)
                         
+                        # Update analytics log with real exit values
+                        if trade_id is not None:
+                            for entry in reversed(self.signal_trade_log):
+                                if entry.get('trade_id') == trade_id:
+                                    entry['exit_value'] = exit_value
+                                    entry['exit_commission'] = exit_commission
+                                    entry['pnl'] = trade_pnl
+                                    break
+                        
                         # Remove the exited trade
                         self.active_trades.pop(trade_index)
                         self.trade_entry_times.pop(trade_index)
