@@ -927,27 +927,6 @@ class TradingEngine:
             self.log(f"[ERROR] Exit execution failed: {str(e)}")
             return False
     
-    def check_exit_conditions(self, positions: List[Position], expiration: str, current_time: datetime.datetime) -> bool:
-        """Exit if either leg hits the VIX-based profit target."""
-        if not self.data_provider or not positions:
-            return False
-        try:
-            df_chain = self.data_provider.get_option_chain("SPY", expiration, current_time)
-            if df_chain.empty:
-                return False
-            for pos in positions:
-                df_pos = df_chain[(df_chain['option_type'] == pos.type) & (df_chain['strike'] == pos.strike)]
-                if df_pos.empty:
-                    continue
-                current_price = df_pos.iloc[0]['bid']
-                if current_price >= pos.target:
-                    self.log(f"🎯 PROFIT TARGET HIT: {pos.type} {pos.strike} | Entry: ${pos.entry_price:.2f} | Target: ${pos.target:.2f} | Current: ${current_price:.2f}")
-                    return True
-            return False
-        except Exception as e:
-            self.log(f"❌ Error checking exit conditions: {e}")
-        return False
-    
     def check_time_based_exit(self, entry_time: datetime.datetime, current_time: datetime.datetime) -> bool:
         """Check time-based exit"""
         hold_duration = (current_time - entry_time).total_seconds()
@@ -956,6 +935,36 @@ class TradingEngine:
             return True
         return False
     
+    def check_combined_profit_exit(self, positions: List[Position], expiration: str, current_time: datetime.datetime) -> bool:
+        """Exit if combined P&L of the position reaches the VIX-based profit target (self.profit_target multiplier)."""
+        if not self.data_provider or not positions:
+            return False
+        try:
+            # Calculate total entry cost (including commission)
+            entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in positions)
+            entry_commission = self.calculate_total_trade_cost(positions, is_exit=False)
+            total_entry_cost = entry_cost + entry_commission
+
+            # Get current exit value (using bid prices)
+            exit_value = self.calculate_exit_value(positions, expiration, current_time)
+            exit_commission = self.calculate_total_trade_cost(positions, is_exit=True)
+            total_exit_value = exit_value - exit_commission
+
+            # Calculate profit target value (VIX-based multiplier)
+            target_value = total_entry_cost * self.profit_target
+            if total_exit_value >= target_value:
+                profit_percentage = ((total_exit_value - total_entry_cost) / total_entry_cost) * 100
+                self.log(f"🎯 COMBINED PROFIT TARGET HIT: Exit Value ${total_exit_value:.2f} >= Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
+                self.log(f"   Entry Cost: ${total_entry_cost:.2f}, Exit Value: ${total_exit_value:.2f}")
+                return True
+            else:
+                profit_percentage = ((total_exit_value - total_entry_cost) / total_entry_cost) * 100
+                self.log(f"⏳ Combined profit check: Exit Value ${total_exit_value:.2f} < Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
+            return False
+        except Exception as e:
+            self.log(f"❌ Error checking combined profit exit: {e}")
+            return False
+
     def check_all_exit_conditions(self, current_time: datetime.datetime) -> List[int]:
         """Check exit conditions for all active trades"""
         trades_to_exit = []
@@ -990,8 +999,8 @@ class TradingEngine:
                     trades_to_exit.append(i)
                     continue
                 
-                # Check profit-based exit conditions
-                if self.check_exit_conditions(trade_positions, expiration, current_time):
+                # Check combined profit-based exit condition
+                if self.check_combined_profit_exit(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
         
         return trades_to_exit
