@@ -1242,12 +1242,8 @@ class TradingEngine:
         self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
         for idx, entry in enumerate(self.signal_trade_log, 1):
             self.log(f"Signal {idx}:")
-            self.log(f"  Detection Time: {entry['timestamp']}")
-            detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window"
-            if entry.get('signal_detected'):
-                detection_cond += ", signal detected"
-            else:
-                detection_cond += ", no signal"
+            self.log(f"  Detection Time: {entry['entry_time']}")
+            detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
             self.log(f"  Detection Condition: {detection_cond}")
             if entry['positions']:
                 self.log(f"  Selected Options:")
@@ -1255,39 +1251,33 @@ class TradingEngine:
                     self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
             else:
                 self.log(f"  Selected Options: None")
-            if entry['action'] == 'entry':
-                self.log(f"  Entry Time: {entry['timestamp']}")
-                self.log(f"  Entry Price: {', '.join([str(pos.get('entry_price', '')) for pos in entry['positions']])}")
-                self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
-                self.log(f"  Commission: ${entry.get('entry_commission', '')}")
-                self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
-            if entry['action'] == 'exit':
-                self.log(f"  Exit Time: {entry['timestamp']}")
+            self.log(f"  Entry Time: {entry['entry_time']}")
+            self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
+            self.log(f"  Commission: ${entry.get('entry_commission', '')}")
+            self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
+            if entry['exit_time']:
+                self.log(f"  Exit Time: {entry['exit_time']}")
                 self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
                 self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
                 self.log(f"  P&L: ${entry.get('pnl', '')}")
-                if entry['positions'] and entry['positions'][0].get('entry_time'):
-                    try:
-                        from datetime import datetime
-                        entry_time = entry['positions'][0]['entry_time']
-                        exit_time = entry['timestamp']
-                        if isinstance(entry_time, str):
-                            entry_time = datetime.fromisoformat(entry_time)
-                        if isinstance(exit_time, str):
-                            exit_time = datetime.fromisoformat(str(exit_time))
-                        holding = exit_time - entry_time
-                        self.log(f"  Holding Time: {holding}")
-                    except Exception:
-                        pass
-                # Always print exit reason
+                # Holding time
+                try:
+                    from datetime import datetime
+                    entry_time = entry['entry_time']
+                    exit_time = entry['exit_time']
+                    if isinstance(entry_time, str):
+                        entry_time = datetime.fromisoformat(str(entry_time))
+                    if isinstance(exit_time, str):
+                        exit_time = datetime.fromisoformat(str(exit_time))
+                    holding = exit_time - entry_time
+                    self.log(f"  Holding Time: {holding}")
+                except Exception:
+                    pass
                 self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
-            if entry['action'] in ['signal_skipped', 'skipped', 'entry_failed', 'exit_failed']:
-                self.log(f"  Status: {entry['action'].replace('_', ' ').title()}")
-                if entry.get('error'):
-                    self.log(f"  Reason: {entry.get('error')}")
-            self.log(f"  Trades Active: {entry.get('trades_active', '')}")
-            self.log(f"  Daily Trades: {self.daily_trades}/{self.max_daily_trades}")
-            self.log(f"  Market Price: ${entry.get('price', '')}")
+            else:
+                self.log(f"  Exit: Still Open or Not Exited During Backtest")
+            self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
+            self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
             self.log(f"  Symbol: {entry.get('symbol', '')}")
             self.log(f"  ---")
         self.log("=" * 80)
