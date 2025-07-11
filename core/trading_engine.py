@@ -7,7 +7,7 @@ Maintains all trading state and logic internally.
 import pandas as pd
 import numpy as np
 import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Union
 from abc import ABC, abstractmethod
 import time
@@ -32,6 +32,7 @@ class Position:
     symbol: str = "SPY"
     expiration_date: str = ""
     entry_time: datetime.datetime = None
+    trade_id: int = field(default=None)  # Add trade_id to Position
 
 
 @dataclass
@@ -552,6 +553,10 @@ class TradingEngine:
                 result['action'] in entry_actions)):
             self.trade_id_counter += 1
             trade_id = self.trade_id_counter
+            # Assign trade_id to all positions in this entry
+            if result.get('positions'):
+                for pos in result['positions']:
+                    setattr(pos, 'trade_id', trade_id)
             log_entry = {
                 'trade_id': trade_id,
                 'timestamp': result['timestamp'],
@@ -583,7 +588,7 @@ class TradingEngine:
                         'symbol': getattr(pos, 'symbol', None),
                         'expiration_date': getattr(pos, 'expiration_date', None),
                         'entry_time': getattr(pos, 'entry_time', None),
-                        'trade_id': trade_id,
+                        'trade_id': getattr(pos, 'trade_id', None),
                     }
                     log_entry['positions'].append(pos_dict)
             self.signal_trade_log.append(log_entry)
@@ -596,7 +601,6 @@ class TradingEngine:
                     trade_id = getattr(result['positions'][0], 'trade_id', None)
                     # If not set on Position, try to infer from analytics log
                     if trade_id is None:
-                        # Try to match by entry_time and symbol as fallback
                         for entry in reversed(self.signal_trade_log):
                             if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
                                 trade_id = entry.get('trade_id')
@@ -608,7 +612,6 @@ class TradingEngine:
                             last_open = entry
                             break
                 else:
-                    # Fallback: match by symbol and open status
                     for entry in reversed(self.signal_trade_log):
                         if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
                             last_open = entry
