@@ -542,6 +542,66 @@ class TradingEngine:
                 })
         self.signal_trade_log.append(log_entry)
         
+        # Debug log for every action
+        self.log(f"[DEBUG] process_row action: {result['action']}")
+        # Log a signal for any action that means a real entry
+        entry_actions = ['entry', 'trade_entered', 'buy', 'signal_approved']
+        if (isinstance(result['action'], str) and (
+                result['action'].lower().find('entry') != -1 or
+                result['action'] in entry_actions)):
+            log_entry = {
+                'timestamp': result['timestamp'],
+                'action': result['action'],
+                'symbol': result['symbol'],
+                'price': result['price'],
+                'move_percent': result['move_percent'],
+                'signal_detected': result['signal_detected'],
+                'trades_active': result['trades_active'],
+                'entry_cost': result.get('entry_cost'),
+                'entry_commission': result.get('entry_commission'),
+                'total_entry_cost': result.get('total_entry_cost'),
+                'positions': [],
+                'entry_time': result['timestamp'],
+                'exit_time': None,
+                'exit_value': None,
+                'exit_commission': None,
+                'pnl': None,
+                'exit_reason': None,
+            }
+            if result.get('positions'):
+                for pos in result['positions']:
+                    log_entry['positions'].append({
+                        'type': getattr(pos, 'type', None),
+                        'strike': getattr(pos, 'strike', None),
+                        'entry_price': getattr(pos, 'entry_price', None),
+                        'contracts': getattr(pos, 'contracts', None),
+                        'target': getattr(pos, 'target', None),
+                        'symbol': getattr(pos, 'symbol', None),
+                        'expiration_date': getattr(pos, 'expiration_date', None),
+                        'entry_time': getattr(pos, 'entry_time', None),
+                    })
+            self.signal_trade_log.append(log_entry)
+            self.log(f"[DEBUG] Signal appended to analytics log. Total signals: {len(self.signal_trade_log)}")
+        elif result['action'] == 'exit':
+            if self.signal_trade_log:
+                last_open = None
+                for entry in reversed(self.signal_trade_log):
+                    if entry['exit_time'] is None:
+                        last_open = entry
+                        break
+                if last_open is not None:
+                    last_open['exit_time'] = result['timestamp']
+                    last_open['exit_value'] = result.get('exit_value')
+                    last_open['exit_commission'] = result.get('exit_commission')
+                    last_open['pnl'] = result.get('pnl')
+                    last_open['exit_reason'] = None
+                    if result.get('error'):
+                        last_open['exit_reason'] = result['error']
+                    elif hasattr(self, '_last_exit_reason') and self._last_exit_reason:
+                        last_open['exit_reason'] = self._last_exit_reason
+                    else:
+                        last_open['exit_reason'] = 'N/A'
+        
         return result
     
     def update_price(self, current_time: datetime.datetime, price: float):
