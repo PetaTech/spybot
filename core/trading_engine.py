@@ -585,8 +585,10 @@ class TradingEngine:
         elif result['action'] == 'exit':
             if self.signal_trade_log:
                 last_open = None
+                # Match by entry_time and symbol for robustness
                 for entry in reversed(self.signal_trade_log):
-                    if entry.get('exit_time') is None:
+                    if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
+                        # If positions exist, also try to match by strike/expiration if needed
                         last_open = entry
                         break
                 if last_open is not None:
@@ -1324,7 +1326,12 @@ class TradingEngine:
                     self.log(f"  Exit Time: {entry.get('exit_time', 'N/A')}")
                     self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
                     self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
-                    self.log(f"  P&L: ${entry.get('pnl', '')}")
+                    self.log(f"  P&L: ${entry.get('pnl', 'N/A')}")
+                    # WIN/LOSS result
+                    pnl = entry.get('pnl')
+                    if pnl is not None:
+                        result_str = 'WIN' if pnl > 0 else 'LOSS'
+                        self.log(f"  Result: {result_str}")
                     try:
                         import datetime
                         entry_time_dt = entry.get('entry_time')
@@ -1340,6 +1347,8 @@ class TradingEngine:
                     self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
                 else:
                     self.log(f"  Exit: Still Open or Not Exited During Backtest")
+                    self.log(f"  P&L: N/A")
+                    self.log(f"  Result: OPEN")
                 self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
                 self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
                 self.log(f"  Symbol: {entry.get('symbol', '')}")
