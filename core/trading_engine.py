@@ -256,6 +256,7 @@ class TradingEngine:
         
         # Add a list to store detailed signal/trade logs
         self.signal_trade_log = []
+        self.trade_id_counter = 0  # Unique trade ID for each signal
     
     def setup_logging(self):
         """Setup logging infrastructure"""
@@ -549,7 +550,10 @@ class TradingEngine:
         if (isinstance(result['action'], str) and (
                 result['action'].lower().find('entry') != -1 or
                 result['action'] in entry_actions)):
+            self.trade_id_counter += 1
+            trade_id = self.trade_id_counter
             log_entry = {
+                'trade_id': trade_id,
                 'timestamp': result['timestamp'],
                 'action': result['action'],
                 'symbol': result['symbol'],
@@ -570,7 +574,7 @@ class TradingEngine:
             }
             if result.get('positions'):
                 for pos in result['positions']:
-                    log_entry['positions'].append({
+                    pos_dict = {
                         'type': getattr(pos, 'type', None),
                         'strike': getattr(pos, 'strike', None),
                         'entry_price': getattr(pos, 'entry_price', None),
@@ -579,18 +583,36 @@ class TradingEngine:
                         'symbol': getattr(pos, 'symbol', None),
                         'expiration_date': getattr(pos, 'expiration_date', None),
                         'entry_time': getattr(pos, 'entry_time', None),
-                    })
+                        'trade_id': trade_id,
+                    }
+                    log_entry['positions'].append(pos_dict)
             self.signal_trade_log.append(log_entry)
-            self.log(f"[DEBUG] Signal appended to analytics log. Total signals: {len(self.signal_trade_log)}")
+            self.log(f"[DEBUG] Signal appended to analytics log. Total signals: {len(self.signal_trade_log)} (trade_id={trade_id})")
         elif result['action'] == 'exit':
             if self.signal_trade_log:
+                # Try to match by trade_id from positions if available
+                trade_id = None
+                if result.get('positions') and len(result['positions']) > 0:
+                    trade_id = getattr(result['positions'][0], 'trade_id', None)
+                    # If not set on Position, try to infer from analytics log
+                    if trade_id is None:
+                        # Try to match by entry_time and symbol as fallback
+                        for entry in reversed(self.signal_trade_log):
+                            if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
+                                trade_id = entry.get('trade_id')
+                                break
                 last_open = None
-                # Match by entry_time and symbol for robustness
-                for entry in reversed(self.signal_trade_log):
-                    if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
-                        # If positions exist, also try to match by strike/expiration if needed
-                        last_open = entry
-                        break
+                if trade_id is not None:
+                    for entry in reversed(self.signal_trade_log):
+                        if entry.get('trade_id') == trade_id and entry.get('exit_time') is None:
+                            last_open = entry
+                            break
+                else:
+                    # Fallback: match by symbol and open status
+                    for entry in reversed(self.signal_trade_log):
+                        if entry.get('exit_time') is None and entry.get('symbol') == result.get('symbol'):
+                            last_open = entry
+                            break
                 if last_open is not None:
                     last_open['exit_time'] = result['timestamp']
                     last_open['exit_value'] = result.get('exit_value')
@@ -1308,7 +1330,7 @@ class TradingEngine:
         else:
             for idx, entry in enumerate(filtered_signals, 1):
                 entry_time = entry.get('entry_time', 'N/A')
-                self.log(f"Signal {idx}:")
+                self.log(f"Signal {idx} (Trade ID: {entry.get('trade_id', 'N/A')}):")
                 self.log(f"  Detection Time: {entry_time}")
                 detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
                 self.log(f"  Detection Condition: {detection_cond}")
@@ -1327,7 +1349,6 @@ class TradingEngine:
                     self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
                     self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
                     self.log(f"  P&L: ${entry.get('pnl', 'N/A')}")
-                    # WIN/LOSS result
                     pnl = entry.get('pnl')
                     if pnl is not None:
                         result_str = 'WIN' if pnl > 0 else 'LOSS'
