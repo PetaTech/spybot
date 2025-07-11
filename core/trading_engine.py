@@ -377,8 +377,13 @@ class TradingEngine:
             for trade_index in reversed(trades_to_exit):
                 trade_positions = self.active_trades[trade_index]
                 entry_time = self.trade_entry_times[trade_index]
-                
-                self.log(f"🔄 EXITING TRADE #{trade_index + 1} (held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
+                trade_id = None
+                if trade_positions and hasattr(trade_positions[0], 'trade_id'):
+                    trade_id = getattr(trade_positions[0], 'trade_id', None)
+                if trade_id is not None:
+                    self.log(f"🔄 EXITING TRADE (Trade ID: {trade_id}, held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
+                else:
+                    self.log(f"🔄 EXITING TRADE (held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
                 
                 # Execute exit
                 if trade_positions and trade_positions[0].expiration_date:
