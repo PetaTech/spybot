@@ -1403,12 +1403,6 @@ class TradingEngine:
         self.log("=" * 80)
         
         self.log("=" * 80)
-        
-        # Print summary to console for backtest mode
-        if self.mode == "backtest":
-            print(f"Backtest Complete: {self.total_trades} trades, ${self.total_pnl:.2f} P&L")
-            print(f"Win Rate: {(self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0:.1f}%")
-            print(f"Log File: {self.log_file}")
 
     def finish(self):
         """Call this when trading is finished (end of data or user interrupt) to log final results."""
