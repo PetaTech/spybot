@@ -253,6 +253,9 @@ class TradingEngine:
         self._set_vix_parameters(force=True)
         self.log(f"VIX regime: {self._vix_regime} (VIX={self._vix_value})")
         self.log(f"VIX config: threshold={self.vix_threshold}, high_vol_move={self.high_vol_move_threshold}, low_vol_move={self.low_vol_move_threshold}")
+        
+        # Add a list to store detailed signal/trade logs
+        self.signal_trade_log = []
     
     def setup_logging(self):
         """Setup logging infrastructure"""
@@ -496,6 +499,39 @@ class TradingEngine:
         self.log(f"📋 CYCLE SUMMARY: {current_time.strftime('%H:%M:%S')} | Action: {result['action']} | Signals: {self.total_signals} | Trades: {self.total_trades} | Active: {len(self.active_trades)}")
         
         print(f"[ENGINE DEBUG] Row processing complete, action: {result['action']}")
+        
+        # Collect detailed info for every signal/trade
+        log_entry = {
+            'timestamp': result['timestamp'],
+            'action': result['action'],
+            'symbol': result['symbol'],
+            'price': result['price'],
+            'move_percent': result['move_percent'],
+            'signal_detected': result['signal_detected'],
+            'trades_active': result['trades_active'],
+            'entry_cost': result.get('entry_cost'),
+            'entry_commission': result.get('entry_commission'),
+            'total_entry_cost': result.get('total_entry_cost'),
+            'exit_value': result.get('exit_value'),
+            'exit_commission': result.get('exit_commission'),
+            'pnl': result.get('pnl'),
+            'positions': [],
+            'error': result.get('error'),
+        }
+        if result.get('positions'):
+            for pos in result['positions']:
+                log_entry['positions'].append({
+                    'type': getattr(pos, 'type', None),
+                    'strike': getattr(pos, 'strike', None),
+                    'entry_price': getattr(pos, 'entry_price', None),
+                    'contracts': getattr(pos, 'contracts', None),
+                    'target': getattr(pos, 'target', None),
+                    'symbol': getattr(pos, 'symbol', None),
+                    'expiration_date': getattr(pos, 'expiration_date', None),
+                    'entry_time': getattr(pos, 'entry_time', None),
+                })
+        self.signal_trade_log.append(log_entry)
+        
         return result
     
     def update_price(self, current_time: datetime.datetime, price: float):
@@ -1186,6 +1222,52 @@ class TradingEngine:
         
         # Log files
         self.log(f"📝 Log File: {self.log_file}")
+        self.log("=" * 80)
+        # Append detailed signal/trade log as a table
+        self.log("================ DETAILED SIGNAL/TRADE LOG ================")
+        # Write header
+        header = [
+            "#", "Action", "Entry Time", "Symbol", "Entry Px", "Contracts", "Strike", "Type", "Target", "Expiration", "Exit Value", "P&L", "Move %", "Trades Active", "Error"
+        ]
+        self.log(",".join(header))
+        for idx, entry in enumerate(self.signal_trade_log, 1):
+            # For each position in entry['positions'], print a row
+            if entry['positions']:
+                for pos in entry['positions']:
+                    row = [
+                        str(idx),
+                        str(entry['action']),
+                        str(entry['timestamp']),
+                        str(entry['symbol']),
+                        str(pos.get('entry_price', '')),
+                        str(pos.get('contracts', '')),
+                        str(pos.get('strike', '')),
+                        str(pos.get('type', '')),
+                        str(pos.get('target', '')),
+                        str(pos.get('expiration_date', '')),
+                        str(entry.get('exit_value', '')),
+                        str(entry.get('pnl', '')),
+                        f"{entry.get('move_percent', 0):.2f}",
+                        str(entry.get('trades_active', '')),
+                        str(entry.get('error', '')),
+                    ]
+                    self.log(",".join(row))
+            else:
+                # If no position, print a row with blanks for position fields
+                row = [
+                    str(idx),
+                    str(entry['action']),
+                    str(entry['timestamp']),
+                    str(entry['symbol']),
+                    '', '', '', '', '', '',
+                    str(entry.get('exit_value', '')),
+                    str(entry.get('pnl', '')),
+                    f"{entry.get('move_percent', 0):.2f}",
+                    str(entry.get('trades_active', '')),
+                    str(entry.get('error', '')),
+                ]
+                self.log(",".join(row))
+        self.log("=" * 80)
         
         self.log("=" * 80)
         
