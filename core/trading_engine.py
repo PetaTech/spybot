@@ -1119,50 +1119,60 @@ class TradingEngine:
             return False
 
     def check_all_exit_conditions(self, current_time: datetime.datetime) -> List[int]:
-        """Check exit conditions for all active trades"""
         trades_to_exit = []
         self._last_exit_reason = None  # Reset before checking
-        
         # Check emergency stop-loss first (highest priority - affects all trades)
         if self.check_emergency_stop_loss(current_time):
             self.log(f"🚨 EMERGENCY STOP LOSS: Forcing exit of all {len(self.active_trades)} active trades")
             return list(range(len(self.active_trades)))
-        
         # Check market close buffer exit (force exit 15 minutes before close)
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
         market_close_datetime = datetime.datetime.combine(current_time.date(), market_close_time)
         if current_time.tzinfo is not None and market_close_datetime.tzinfo is None:
             market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
-        
         if time_until_close < self.market_close_buffer_minutes:
-            # Force exit all trades due to market close buffer
             self.log(f"⏰ MARKET CLOSE BUFFER EXIT: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer. Forcing exit of all trades.")
-            self._last_exit_reason = 'market close'  # Set exit reason
+            self._last_exit_reason = 'market close'
             return list(range(len(self.active_trades)))
-        
         for i, (trade_positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
             if self.check_time_based_exit(entry_time, current_time):
                 trades_to_exit.append(i)
                 self._last_exit_reason = 'time-based exit'
+                # Update analytics log immediately for time-based exit
+                self._update_analytics_exit(trade_positions, current_time, 'time-based exit')
                 continue
-            
             if trade_positions and trade_positions[0].expiration_date:
                 expiration = trade_positions[0].expiration_date
-                
-                # Check stop-loss first (highest priority)
                 if self.check_stop_loss(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
                     self._last_exit_reason = 'stop loss'
+                    # Update analytics log immediately for stop loss
+                    self._update_analytics_exit(trade_positions, current_time, 'stop loss')
                     continue
-                
-                # Check combined profit-based exit condition
                 if self.check_combined_profit_exit(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
                     self._last_exit_reason = 'profit target'
-        
+                    # Update analytics log immediately for profit target
+                    self._update_analytics_exit(trade_positions, current_time, 'profit target')
         return trades_to_exit
-    
+
+    def _update_analytics_exit(self, trade_positions, exit_time, exit_reason):
+        # Helper to update analytics log for a specific exit reason
+        trade_id = None
+        if trade_positions and hasattr(trade_positions[0], 'trade_id'):
+            trade_id = getattr(trade_positions[0], 'trade_id', None)
+        if trade_id is not None:
+            for entry in reversed(self.signal_trade_log):
+                if entry.get('trade_id') == trade_id and entry.get('exit_time') is None:
+                    entry['exit_time'] = exit_time
+                    # These values may be None if not available, but set them if you have them
+                    entry['exit_value'] = None
+                    entry['exit_commission'] = None
+                    entry['pnl'] = None
+                    entry['exit_reason'] = exit_reason
+                    break
+
     def increment_daily_trades(self):
         """Increment daily trade count"""
         self.daily_trades += 1
