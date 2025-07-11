@@ -897,7 +897,6 @@ class TradingEngine:
         """Execute entry orders"""
         if not self.order_executor:
             return False
-        
         try:
             for pos in positions:
                 order_id = self.order_executor.place_order(
@@ -905,6 +904,7 @@ class TradingEngine:
                     action="BUY", expiration_date=expiration
                 )
                 self.log(f"ENTRY {pos.type} Strike={pos.strike} Qty={pos.contracts} Price={pos.entry_price:.2f} OrderID={order_id}")
+            self.total_trades += 1  # Increment total trades on entry
             return True
         except Exception as e:
             self.log(f"[ERROR] Entry execution failed: {str(e)}")
@@ -914,7 +914,6 @@ class TradingEngine:
         """Execute exit orders"""
         if not self.order_executor:
             return False
-        
         try:
             for pos in positions:
                 order_id = self.order_executor.place_order(
@@ -922,6 +921,7 @@ class TradingEngine:
                     action="SELL", expiration_date=pos.expiration_date
                 )
                 self.log(f"EXIT {pos.type} Strike={pos.strike} Qty={pos.contracts} OrderID={order_id}")
+            self.total_trades += 1  # Increment total trades on exit
             return True
         except Exception as e:
             self.log(f"[ERROR] Exit execution failed: {str(e)}")
