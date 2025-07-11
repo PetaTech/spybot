@@ -517,7 +517,17 @@ class TradingEngine:
             'pnl': result.get('pnl'),
             'positions': [],
             'error': result.get('error'),
+            'exit_reason': None,  # New field for exit reason
         }
+        # Determine exit reason if this is an exit
+        if result['action'] == 'exit':
+            # Try to infer from error or context
+            if result.get('error'):
+                log_entry['exit_reason'] = result['error']
+            elif hasattr(self, '_last_exit_reason') and self._last_exit_reason:
+                log_entry['exit_reason'] = self._last_exit_reason
+            else:
+                log_entry['exit_reason'] = 'N/A'
         if result.get('positions'):
             for pos in result['positions']:
                 log_entry['positions'].append({
@@ -1004,6 +1014,7 @@ class TradingEngine:
     def check_all_exit_conditions(self, current_time: datetime.datetime) -> List[int]:
         """Check exit conditions for all active trades"""
         trades_to_exit = []
+        self._last_exit_reason = None  # Reset before checking
         
         # Check emergency stop-loss first (highest priority - affects all trades)
         if self.check_emergency_stop_loss(current_time):
@@ -1020,11 +1031,13 @@ class TradingEngine:
         if time_until_close < self.market_close_buffer_minutes:
             # Force exit all trades due to market close buffer
             self.log(f"⏰ MARKET CLOSE BUFFER EXIT: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer. Forcing exit of all trades.")
+            self._last_exit_reason = 'market close'  # Set exit reason
             return list(range(len(self.active_trades)))
         
         for i, (trade_positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
             if self.check_time_based_exit(entry_time, current_time):
                 trades_to_exit.append(i)
+                self._last_exit_reason = 'time-based exit'
                 continue
             
             if trade_positions and trade_positions[0].expiration_date:
@@ -1033,11 +1046,13 @@ class TradingEngine:
                 # Check stop-loss first (highest priority)
                 if self.check_stop_loss(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
+                    self._last_exit_reason = 'stop loss'
                     continue
                 
                 # Check combined profit-based exit condition
                 if self.check_combined_profit_exit(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
+                    self._last_exit_reason = 'profit target'
         
         return trades_to_exit
     
@@ -1223,50 +1238,58 @@ class TradingEngine:
         # Log files
         self.log(f"📝 Log File: {self.log_file}")
         self.log("=" * 80)
-        # Append detailed signal/trade log as a table
-        self.log("================ DETAILED SIGNAL/TRADE LOG ================")
-        # Write header
-        header = [
-            "#", "Action", "Entry Time", "Symbol", "Entry Px", "Contracts", "Strike", "Type", "Target", "Expiration", "Exit Value", "P&L", "Move %", "Trades Active", "Error"
-        ]
-        self.log(",".join(header))
+        # Append detailed signal/trade analytics in a professional, narrative style
+        self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
         for idx, entry in enumerate(self.signal_trade_log, 1):
-            # For each position in entry['positions'], print a row
-            if entry['positions']:
-                for pos in entry['positions']:
-                    row = [
-                        str(idx),
-                        str(entry['action']),
-                        str(entry['timestamp']),
-                        str(entry['symbol']),
-                        str(pos.get('entry_price', '')),
-                        str(pos.get('contracts', '')),
-                        str(pos.get('strike', '')),
-                        str(pos.get('type', '')),
-                        str(pos.get('target', '')),
-                        str(pos.get('expiration_date', '')),
-                        str(entry.get('exit_value', '')),
-                        str(entry.get('pnl', '')),
-                        f"{entry.get('move_percent', 0):.2f}",
-                        str(entry.get('trades_active', '')),
-                        str(entry.get('error', '')),
-                    ]
-                    self.log(",".join(row))
+            self.log(f"Signal {idx}:")
+            self.log(f"  Detection Time: {entry['timestamp']}")
+            detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window"
+            if entry.get('signal_detected'):
+                detection_cond += ", signal detected"
             else:
-                # If no position, print a row with blanks for position fields
-                row = [
-                    str(idx),
-                    str(entry['action']),
-                    str(entry['timestamp']),
-                    str(entry['symbol']),
-                    '', '', '', '', '', '',
-                    str(entry.get('exit_value', '')),
-                    str(entry.get('pnl', '')),
-                    f"{entry.get('move_percent', 0):.2f}",
-                    str(entry.get('trades_active', '')),
-                    str(entry.get('error', '')),
-                ]
-                self.log(",".join(row))
+                detection_cond += ", no signal"
+            self.log(f"  Detection Condition: {detection_cond}")
+            if entry['positions']:
+                self.log(f"  Selected Options:")
+                for pos in entry['positions']:
+                    self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
+            else:
+                self.log(f"  Selected Options: None")
+            if entry['action'] == 'entry':
+                self.log(f"  Entry Time: {entry['timestamp']}")
+                self.log(f"  Entry Price: {', '.join([str(pos.get('entry_price', '')) for pos in entry['positions']])}")
+                self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
+                self.log(f"  Commission: ${entry.get('entry_commission', '')}")
+                self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
+            if entry['action'] == 'exit':
+                self.log(f"  Exit Time: {entry['timestamp']}")
+                self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
+                self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
+                self.log(f"  P&L: ${entry.get('pnl', '')}")
+                if entry['positions'] and entry['positions'][0].get('entry_time'):
+                    try:
+                        from datetime import datetime
+                        entry_time = entry['positions'][0]['entry_time']
+                        exit_time = entry['timestamp']
+                        if isinstance(entry_time, str):
+                            entry_time = datetime.fromisoformat(entry_time)
+                        if isinstance(exit_time, str):
+                            exit_time = datetime.fromisoformat(str(exit_time))
+                        holding = exit_time - entry_time
+                        self.log(f"  Holding Time: {holding}")
+                    except Exception:
+                        pass
+                # Always print exit reason
+                self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
+            if entry['action'] in ['signal_skipped', 'skipped', 'entry_failed', 'exit_failed']:
+                self.log(f"  Status: {entry['action'].replace('_', ' ').title()}")
+                if entry.get('error'):
+                    self.log(f"  Reason: {entry.get('error')}")
+            self.log(f"  Trades Active: {entry.get('trades_active', '')}")
+            self.log(f"  Daily Trades: {self.daily_trades}/{self.max_daily_trades}")
+            self.log(f"  Market Price: ${entry.get('price', '')}")
+            self.log(f"  Symbol: {entry.get('symbol', '')}")
+            self.log(f"  ---")
         self.log("=" * 80)
         
         self.log("=" * 80)
