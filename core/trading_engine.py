@@ -1240,49 +1240,51 @@ class TradingEngine:
         self.log("=" * 80)
         # Append detailed signal/trade analytics in a professional, narrative style
         self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
-        # Only process entries with 'entry_time' (actual signals)
         filtered_signals = [entry for entry in self.signal_trade_log if 'entry_time' in entry]
-        for idx, entry in enumerate(filtered_signals, 1):
-            entry_time = entry.get('entry_time', 'N/A')
-            self.log(f"Signal {idx}:")
-            self.log(f"  Detection Time: {entry_time}")
-            detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
-            self.log(f"  Detection Condition: {detection_cond}")
-            if entry['positions']:
-                self.log(f"  Selected Options:")
-                for pos in entry['positions']:
-                    self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
-            else:
-                self.log(f"  Selected Options: None")
-            self.log(f"  Entry Time: {entry_time}")
-            self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
-            self.log(f"  Commission: ${entry.get('entry_commission', '')}")
-            self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
-            if entry.get('exit_time'):
-                self.log(f"  Exit Time: {entry.get('exit_time', 'N/A')}")
-                self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
-                self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
-                self.log(f"  P&L: ${entry.get('pnl', '')}")
-                # Holding time
-                try:
-                    from datetime import datetime
-                    entry_time_dt = entry.get('entry_time')
-                    exit_time_dt = entry.get('exit_time')
-                    if isinstance(entry_time_dt, str):
-                        entry_time_dt = datetime.fromisoformat(str(entry_time_dt))
-                    if isinstance(exit_time_dt, str):
-                        exit_time_dt = datetime.fromisoformat(str(exit_time_dt))
-                    holding = exit_time_dt - entry_time_dt
-                    self.log(f"  Holding Time: {holding}")
-                except Exception:
-                    pass
-                self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
-            else:
-                self.log(f"  Exit: Still Open or Not Exited During Backtest")
-            self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
-            self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
-            self.log(f"  Symbol: {entry.get('symbol', '')}")
-            self.log(f"  ---")
+        if not filtered_signals:
+            self.log("No signals (entries) detected during this backtest.")
+        else:
+            for idx, entry in enumerate(filtered_signals, 1):
+                entry_time = entry.get('entry_time', 'N/A')
+                self.log(f"Signal {idx}:")
+                self.log(f"  Detection Time: {entry_time}")
+                detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
+                self.log(f"  Detection Condition: {detection_cond}")
+                if entry['positions']:
+                    self.log(f"  Selected Options:")
+                    for pos in entry['positions']:
+                        self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
+                else:
+                    self.log(f"  Selected Options: None")
+                self.log(f"  Entry Time: {entry_time}")
+                self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
+                self.log(f"  Commission: ${entry.get('entry_commission', '')}")
+                self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
+                if entry.get('exit_time'):
+                    self.log(f"  Exit Time: {entry.get('exit_time', 'N/A')}")
+                    self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
+                    self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
+                    self.log(f"  P&L: ${entry.get('pnl', '')}")
+                    try:
+                        from datetime import datetime
+                        entry_time_dt = entry.get('entry_time')
+                        exit_time_dt = entry.get('exit_time')
+                        if isinstance(entry_time_dt, str):
+                            entry_time_dt = datetime.fromisoformat(str(entry_time_dt))
+                        if isinstance(exit_time_dt, str):
+                            exit_time_dt = datetime.fromisoformat(str(exit_time_dt))
+                        holding = exit_time_dt - entry_time_dt
+                        self.log(f"  Holding Time: {holding}")
+                    except Exception:
+                        pass
+                    self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
+                else:
+                    self.log(f"  Exit: Still Open or Not Exited During Backtest")
+                self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
+                self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
+                self.log(f"  Symbol: {entry.get('symbol', '')}")
+                self.log(f"  ---")
+        self.log(f"[DEBUG] Total signals in analytics log: {len(filtered_signals)}")
         self.log("=" * 80)
         
         self.log("=" * 80)
