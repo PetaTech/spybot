@@ -9,7 +9,7 @@ COOLDOWN_PERIOD = 20 * 60  # 20 minutes between trades
 RISK_PER_SIDE = 400  # $ risk per side
 MAX_RETRIES = 6  # Maximum retries for option chain fetching
 RETRY_DELAY = 5  # Seconds between retries
-PRICE_WINDOW_SECONDS = 30 * 60  # 30 minutes rolling window
+PRICE_WINDOW_SECONDS = 5 * 60  # 30 minutes rolling window
 MAX_ENTRY_TIME = '15:00'  # Stop entering after 3 PM
 
 # === Option Filtering Parameters ===

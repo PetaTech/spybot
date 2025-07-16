@@ -851,8 +851,11 @@ class TradingEngine:
                 if df_chain.empty or "option_type" not in df_chain.columns:
                     self.log("[ERROR] Option chain missing or invalid.")
                     continue
+                self.log(f"[DEBUG] Option chain loaded: {len(df_chain)} contracts")
+                self.log(f"[DEBUG] Premium range: ${self.premium_min:.2f}-${self.premium_max:.2f}, Bid/Ask ratio: {self.option_bid_ask_ratio}")
                 for option_type in ['C', 'P']:
                     df_side = df_chain[df_chain['option_type'] == option_type].copy()
+                    self.log(f"[DEBUG] {option_type} side: {len(df_side)} contracts before filtering")
                     if df_side.empty:
                         continue
                     df_side['dist'] = abs(df_side['strike'] - price)
@@ -861,9 +864,14 @@ class TradingEngine:
                     valid = df_side[df_side['ask'].between(self.premium_min, self.premium_max)]
                     if not valid.empty:
                         valid = valid[valid['ask'] > valid['bid'] * self.option_bid_ask_ratio]
+                    self.log(f"[DEBUG] {option_type} side: {len(valid)} contracts after filtering")
                     if valid.empty:
-                        self.log(f"ℹ️  No suitable {option_type} options found (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
+                        self.log(f"[DEBUG] No valid {option_type} options after filtering. Available strikes and prices:")
+                        for _, row in df_side.iterrows():
+                            self.log(f"    Strike={row['strike']}, Bid={row['bid']}, Ask={row['ask']}")
                         continue
+                    for _, row in valid.iterrows():
+                        self.log(f"[DEBUG] {option_type} candidate: Strike={row['strike']}, Bid={row['bid']}, Ask={row['ask']}")
                     row = valid.iloc[0]
                     strike = row['strike']
                     entry_price = row['ask']
