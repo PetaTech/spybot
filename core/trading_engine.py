@@ -851,19 +851,13 @@ class TradingEngine:
                 if df_chain.empty or "option_type" not in df_chain.columns:
                     self.log("[ERROR] Option chain missing or invalid.")
                     continue
-                # ENHANCED LOGGING: Print columns and sample of raw option chain
-                self.log(f"[DEBUG] Option chain columns: {list(df_chain.columns)}")
-                self.log(f"[DEBUG] Option chain sample (first 5 rows):\n{df_chain.head(5).to_string(index=False)}")
+                # Remove detailed debug: columns, sample, unique values
                 self.log(f"[DEBUG] Option chain loaded: {len(df_chain)} contracts")
                 self.log(f"[DEBUG] Premium range: ${self.premium_min:.2f}-${self.premium_max:.2f}, Bid/Ask ratio: {self.option_bid_ask_ratio}")
-                for option_type in ['C', 'P']:
-                    df_side = df_chain[df_chain['option_type'] == option_type].copy()
+                for option_type, option_label in [('C', 'call'), ('P', 'put')]:
+                    df_side = df_chain[df_chain['option_type'] == option_label].copy()
                     self.log(f"[DEBUG] {option_type} side: {len(df_side)} contracts before filtering")
-                    # If empty, log unique values and more sample
                     if df_side.empty:
-                        self.log(f"[DEBUG] No contracts found for {option_type} side before filtering.")
-                        self.log(f"[DEBUG] Unique values in 'option_type': {df_chain['option_type'].unique()}")
-                        self.log(f"[DEBUG] Full option chain sample (first 5 rows):\n{df_chain.head(5).to_string(index=False)}")
                         continue
                     df_side['dist'] = abs(df_side['strike'] - price)
                     df_side = df_side.sort_values('dist')
