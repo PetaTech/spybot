@@ -89,17 +89,32 @@ def place_order(option_type: str, strike: float, contracts: int,
                 expiration_date: str = None, price: float = None) -> str:
     """Place an order and return order ID"""
     api = get_api_instance()
-    option_symbol = get_option_symbol(symbol, strike, option_type, expiration_date)
-    
+
+    # ✅ Fetch option chain and find matching OCC symbol
+    chain_df = get_option_chain(symbol, expiration_date)
+    if chain_df.empty:
+        raise Exception("No options returned from Tradier chain API")
+
+    # Match the desired strike and type
+    desired = chain_df[
+        (chain_df['strike'] == strike) &
+        (chain_df['option_type'].str.upper() == ('CALL' if option_type.upper() == 'C' else 'PUT'))
+    ]
+
+    if desired.empty:
+        raise Exception(f"Could not find matching option for {symbol} {option_type} {strike} {expiration_date}")
+
+    option_symbol = desired.iloc[0]['symbol']  # ✅ Use Tradier-provided OCC symbol
+
     payload = {
         "class": "option",
         "symbol": option_symbol,
-        "side": action.lower(),     # 'buy' or 'sell'
+        "side": action.lower(),
         "quantity": contracts,
-        "type": "market",           # Market order
+        "type": "market",
         "duration": "day"
     }
-    
+
     try:
         result = api.post_request(f"/accounts/{api.account_id}/orders", payload)
         return result.get("order", {}).get("id", "N/A")
