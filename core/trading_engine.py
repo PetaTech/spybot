@@ -171,7 +171,6 @@ class TradingEngine:
         self.retry_delay = config.get('RETRY_DELAY', 1)
         self.price_window_seconds = config.get('PRICE_WINDOW_SECONDS', 30 * 60)
         self.max_entry_time = config.get('MAX_ENTRY_TIME', datetime.time(15, 0))
-        self.max_hold_seconds = config.get('MAX_HOLD_SECONDS', 3600)
         self.stop_loss_percentage = config.get('STOP_LOSS_PERCENTAGE', 30.0)
         self.emergency_stop_loss = config.get('EMERGENCY_STOP_LOSS', 2000)
         
@@ -1098,14 +1097,6 @@ class TradingEngine:
             self.log(f"[ERROR] Exit execution failed: {str(e)}")
             return False
     
-    def check_time_based_exit(self, entry_time: datetime.datetime, current_time: datetime.datetime) -> bool:
-        """Check time-based exit"""
-        hold_duration = (current_time - entry_time).total_seconds()
-        if hold_duration >= self.max_hold_seconds:
-            self.log(f"⏰ TIME-BASED EXIT: Trade held for {hold_duration/60:.1f} minutes >= {self.max_hold_seconds/60:.1f} minutes")
-            return True
-        return False
-    
     def check_combined_profit_exit(self, positions: List[Position], expiration: str, current_time: datetime.datetime) -> bool:
         """Exit if combined P&L of the position reaches the VIX-based profit target (self.profit_target multiplier)."""
         if not self.data_provider or not positions:
@@ -1154,12 +1145,6 @@ class TradingEngine:
             self._last_exit_reason = 'market close'
             return list(range(len(self.active_trades)))
         for i, (trade_positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
-            if self.check_time_based_exit(entry_time, current_time):
-                trades_to_exit.append(i)
-                self._last_exit_reason = 'time-based exit'
-                # Update analytics log immediately for time-based exit
-                self._update_analytics_exit(trade_positions, current_time, 'time-based exit')
-                continue
             if trade_positions and trade_positions[0].expiration_date:
                 expiration = trade_positions[0].expiration_date
                 if self.check_stop_loss(trade_positions, expiration, current_time):

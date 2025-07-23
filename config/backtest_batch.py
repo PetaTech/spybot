@@ -48,7 +48,6 @@ FIXED_PARAMETERS = {
     'MAX_DAILY_TRADES', 'MAX_DAILY_LOSS', 'EMERGENCY_STOP_LOSS',  # Fixed risk management
     'MARKET_OPEN_BUFFER_MINUTES', 'MARKET_CLOSE_BUFFER_MINUTES',  # Fixed timing
     'EARLY_SIGNAL_COOLDOWN_MINUTES', 'PRICE_WINDOW_SECONDS',  # Fixed timing
-    'MAX_HOLD_SECONDS',  # Fixed hold time
     'HIGH_VOL_PREMIUM_MIN', 'HIGH_VOL_PREMIUM_MAX',  # Fixed VIX premium ranges
     'LOW_VOL_PREMIUM_MIN', 'LOW_VOL_PREMIUM_MAX',  # Fixed VIX premium ranges
 }

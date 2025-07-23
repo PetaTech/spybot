@@ -112,7 +112,6 @@ RISK_PER_SIDE = 400                 # $400 risk per trade
 MAX_DAILY_TRADES = 5                # Maximum 5 trades per day
 MAX_DAILY_LOSS = 1000               # $1000 max daily loss
 STOP_LOSS_PERCENTAGE = 12.0         # 12% stop loss
-MAX_HOLD_SECONDS = 3600             # 1 hour max hold time
 
 # Option Parameters
 OPTION_TARGET_MULTIPLIER = 2.35     # Exit at 2.35x entry price
@@ -173,7 +172,6 @@ TUNABLE_PARAMETERS = {
     'RISK_PER_SIDE': [400],
     'OPTION_TARGET_MULTIPLIER': [2.35],
     'MIN_PROFIT_PERCENTAGE': [30.0],
-    'MAX_HOLD_SECONDS': [3600],
     'STOP_LOSS_PERCENTAGE': [12.0],
     'OPTION_ASK_MIN': [0.5],
     'OPTION_ASK_MAX': [300.0],

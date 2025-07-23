@@ -22,7 +22,6 @@ MAX_DAILY_TRADES = 500000  # Maximum trades per day
 MAX_DAILY_LOSS = 1000  # $1000 max daily loss
 EMERGENCY_STOP_LOSS = 2000  # $2000 emergency stop loss
 STOP_LOSS_PERCENTAGE = 50.0  # Exit if loss exceeds 50% of entry cost
-MAX_HOLD_SECONDS = 3600  # 1 hour max hold time for any trade
 
 # === Market Hours ===
 MARKET_OPEN = '09:30'
