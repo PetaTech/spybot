@@ -121,12 +121,14 @@ def main():
     print(f"\n🕐 Current Time (NY): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print(f"📈 Market Hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
     
+    # Check if market is open for informational purposes
     if not (market_open <= now.time() <= market_close):
-        print("❌ Market is currently CLOSED. Paper trading will not detect signals.")
-        print("💡 Try running during market hours (9:30 AM - 4:00 PM EDT)")
-        return
+        print("⚠️ Market is currently CLOSED. Bot will run 24/7 but signals only during market hours.")
+        print(f"💡 Trading signals will be active during market hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
+    else:
+        print("✅ Market is OPEN. Starting paper trading...")
     
-    print("✅ Market is OPEN. Starting paper trading...")
+    print("🚀 Bot running in 24/7 mode - will continue monitoring even after market close")
     
     # Create data provider and config
     data_provider = PaperDataProvider(TRADIER_API_URL, TRADIER_ACCESS_TOKEN)

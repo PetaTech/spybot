@@ -121,29 +121,14 @@ def main():
     print(f"\n🕐 Current Time (NY): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print(f"📈 Market Hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
     
-    while not (market_open <= now.time() <= market_close):
-        print("❌ Market is currently CLOSED. Live trading will not detect signals.")
-        now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
-        print(f"\n🕐 Current Time (NY): {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        # Calculate time left to open
-        today_open = now.replace(hour=market_open.hour, minute=market_open.minute, second=0, microsecond=0)
-        if now.time() > market_close:
-            # If after market close, next open is tomorrow
-            next_open = today_open + datetime.timedelta(days=1)
-        elif now.time() < market_open:
-            # If before market open, open is today
-            next_open = today_open
-        else:
-            # Should not happen, but fallback
-            next_open = today_open
-        time_left = next_open - now
-        total_seconds = int(time_left.total_seconds())
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        print(f"💡 Waiting for market to open (9:30 AM - 4:00 PM EDT)... {hours}h {minutes}m left")
-        time.sleep(60)
-        now = datetime.datetime.now(tz=tz.gettz(TIMEZONE))
-    print("✅ Market is OPEN. Starting live trading...")
+    # Check if market is open for informational purposes
+    if not (market_open <= now.time() <= market_close):
+        print("⚠️ Market is currently CLOSED. Bot will run 24/7 but signals only during market hours.")
+        print(f"💡 Trading signals will be active during market hours: {MARKET_OPEN} - {MARKET_CLOSE} EDT")
+    else:
+        print("✅ Market is OPEN. Starting live trading...")
+    
+    print("🚀 Bot running in 24/7 mode - will continue monitoring even after market close")
     
     # Create data provider and config
     data_provider = LiveDataProvider(TRADIER_API_URL, TRADIER_ACCESS_TOKEN)
