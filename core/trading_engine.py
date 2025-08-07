@@ -806,10 +806,8 @@ class TradingEngine:
             self.log(f"⏰ TOO CLOSE TO CLOSE: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer")
             return False
         
-        # Check regular cooldown between trades
-        if (self.last_trade_time and 
-            (current_time - self.last_trade_time).total_seconds() < self.cooldown_period):
-            return False
+        # Note: Regular cooldown between trades is already handled by signal detection cooldown
+        # The last_flagged_time cooldown in should_detect_signal() provides sufficient spacing
         
         return True
     
@@ -1493,6 +1491,10 @@ class TradingEngine:
             if df_chain.empty:
                 return 0.0
             
+            # Map Tradier API 'call'/'put' to 'C'/'P' format
+            if 'option_type' in df_chain.columns:
+                df_chain['option_type'] = df_chain['option_type'].map({'call': 'C', 'put': 'P'}).fillna(df_chain['option_type'])
+            
             exit_value = 0.0
             for pos in positions:
                 df_pos = df_chain[
@@ -1501,10 +1503,12 @@ class TradingEngine:
                 ]
                 
                 if df_pos.empty:
+                    self.log(f"[DEBUG] No match found for {pos.type} {pos.strike} in option chain")
                     continue
                 
                 current_price = df_pos.iloc[0]['bid']  # Use BID price for exit (selling)
                 exit_value += current_price * 100 * pos.contracts
+                self.log(f"[DEBUG] Exit price for {pos.type} {pos.strike}: ${current_price:.2f} x {pos.contracts} contracts")
             
             return exit_value
         except Exception as e:
