@@ -135,7 +135,10 @@ def main():
     config = create_config()
     
     # Create trading engine (engine manages orders internally)
-    trading_engine = TradingEngine(config, data_provider, mode="paper")
+    trading_engine = TradingEngine(config, data_provider, mode="paper", 
+                                 api_url=TRADIER_API_URL, 
+                                 access_token=TRADIER_ACCESS_TOKEN, 
+                                 account_id=ACCOUNT_ID)
     
     try:
         # Process data rows

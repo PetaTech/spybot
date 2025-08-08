@@ -90,16 +90,27 @@ class BacktestOrderExecutor(OrderExecutor):
 
 
 class PaperOrderExecutor(OrderExecutor):
-    """Paper trading order executor - simulates orders without real execution"""
+    """Paper trading order executor - places ACTUAL orders in sandbox environment"""
     
-    def __init__(self):
+    def __init__(self, api_url: str, access_token: str, account_id: str):
+        self.api_url = api_url
+        self.access_token = access_token
+        self.account_id = account_id
         self.order_counter = 0
     
     def place_order(self, option_type: str, strike: float, contracts: int, 
                    action: str, expiration_date: str, price: Optional[float] = None) -> str:
-        """Simulate order placement - returns fake order ID"""
-        self.order_counter += 1
-        order_id = f"PAPER_{self.order_counter:06d}"
+        """Place ACTUAL order in sandbox environment"""
+        # Import here to avoid circular imports
+        from utils.tradier_api import place_order
+        
+        # Place real order in sandbox
+        order_id = place_order(option_type, strike, contracts, action=action, 
+                              expiration_date=expiration_date, price=price)
+        
+        # Log the order placement
+        print(f"🔴 SANDBOX ORDER PLACED: {action} {contracts} {option_type} {strike} exp:{expiration_date} -> ID: {order_id}")
+        
         return order_id
 
 
@@ -156,7 +167,9 @@ class TradingEngine:
         if mode == "backtest":
             self.order_executor = BacktestOrderExecutor()
         elif mode == "paper":
-            self.order_executor = PaperOrderExecutor()
+            if not all([api_url, access_token, account_id]):
+                raise ValueError("Paper mode requires api_url, access_token, and account_id for sandbox orders")
+            self.order_executor = PaperOrderExecutor(api_url, access_token, account_id)
         elif mode == "live":
             if not all([api_url, access_token, account_id]):
                 raise ValueError("Live mode requires api_url, access_token, and account_id")
