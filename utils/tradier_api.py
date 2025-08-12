@@ -106,10 +106,19 @@ def place_order(option_type: str, strike: float, contracts: int,
 
     option_symbol = desired.iloc[0]['symbol']  # ✅ Use Tradier-provided OCC symbol
 
+    # Convert action to proper option side format
+    if action.upper() == "BUY":
+        side = "buy_to_open"
+    elif action.upper() == "SELL":
+        side = "sell_to_close"
+    else:
+        side = action.lower()  # Fallback for other formats
+    
     payload = {
         "class": "option",
-        "symbol": option_symbol,
-        "side": action.lower(),
+        "symbol": symbol,  # ✅ Underlying symbol (SPY)
+        "option_symbol": option_symbol,  # ✅ Full OCC symbol (SPY250812C00642000)
+        "side": side,  # ✅ Proper option side (buy_to_open/sell_to_close)
         "quantity": contracts,
         "type": "market",
         "duration": "day"
