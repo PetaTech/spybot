@@ -3,6 +3,7 @@
 import requests
 import pandas as pd
 import datetime
+from typing import Dict, List
 
 # === Tradier API Client Class ===
 class TradierAPI:
@@ -13,14 +14,21 @@ class TradierAPI:
         self.access_token = access_token
         self.account_id = account_id
     
-    def request(self, endpoint: str, params=None):
-        """Make a GET request to the Tradier API"""
+    def request(self, endpoint: str, params=None, method="GET"):
+        """Make a request to the Tradier API"""
         url = f"{self.api_url}{endpoint}"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Accept": "application/json"
         }
-        response = requests.get(url, headers=headers, params=params)
+        
+        if method.upper() == "GET":
+            response = requests.get(url, headers=headers, params=params)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, headers=headers)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
+            
         response.raise_for_status()
         return response.json()
     
@@ -196,6 +204,125 @@ def test_connection():
         print("2. Your account ID is correct")
         print("3. You have proper permissions")
         return False
+
+def place_limit_order(option_type: str, strike: float, contracts: int, 
+                      action: str = "BUY", symbol: str = "SPY", 
+                      expiration_date: str = None, limit_price: float = None) -> str:
+    """Place a LIMIT order and return order ID"""
+    api = get_api_instance()
+
+    # Fetch option chain and find matching OCC symbol
+    chain_df = get_option_chain(symbol, expiration_date)
+    if chain_df.empty:
+        raise Exception("No options returned from Tradier chain API")
+
+    # Match the desired strike and type
+    desired = chain_df[
+        (chain_df['strike'] == strike) &
+        (chain_df['option_type'].str.upper() == ('CALL' if option_type.upper() == 'C' else 'PUT'))
+    ]
+
+    if desired.empty:
+        raise Exception(f"Could not find matching option for {symbol} {option_type} {strike} {expiration_date}")
+
+    option_symbol = desired.iloc[0]['symbol']
+
+    # Convert action to proper option side format
+    if action.upper() == "BUY":
+        side = "buy_to_open"
+    elif action.upper() == "SELL":
+        side = "sell_to_close"
+    else:
+        side = action.lower()
+    
+    payload = {
+        "class": "option",
+        "symbol": symbol,
+        "option_symbol": option_symbol,
+        "side": side,
+        "quantity": contracts,
+        "type": "limit",  # LIMIT order instead of market
+        "price": limit_price,  # Limit price
+        "duration": "day"
+    }
+
+    try:
+        result = api.post_request(f"/accounts/{api.account_id}/orders", payload)
+        order_id = result.get("order", {}).get("id", "N/A")
+        print(f"🎯 LIMIT ORDER PLACED: {action} {contracts} {option_type} {strike} @ ${limit_price:.2f} -> ID: {order_id}")
+        return order_id
+    except Exception as e:
+        print(f"[ERROR] Limit order failed: {str(e)}")
+        return "FAILED"
+
+
+def get_order_status(order_id: str) -> Dict:
+    """Get order status by order ID"""
+    api = get_api_instance()
+    
+    try:
+        result = api.request(f"/accounts/{api.account_id}/orders/{order_id}")
+        order = result.get("order", {})
+        
+        status_info = {
+            'id': order.get('id', 'N/A'),
+            'status': order.get('status', 'unknown'),
+            'state': order.get('state', 'unknown'),
+            'filled_quantity': int(order.get('exec_quantity', 0)),
+            'remaining_quantity': int(order.get('remaining_quantity', 0)),
+            'avg_fill_price': float(order.get('avg_fill_price', 0.0)),
+            'symbol': order.get('option_symbol', order.get('symbol', 'N/A')),
+            'side': order.get('side', 'N/A'),
+            'price': float(order.get('price', 0.0)),
+            'type': order.get('type', 'N/A')
+        }
+        
+        return status_info
+    except Exception as e:
+        print(f"[ERROR] Failed to get order status for {order_id}: {str(e)}")
+        return {'id': order_id, 'status': 'error', 'state': 'error'}
+
+
+def cancel_order(order_id: str) -> bool:
+    """Cancel an order by order ID"""
+    api = get_api_instance()
+    
+    try:
+        result = api.request(f"/accounts/{api.account_id}/orders/{order_id}", method="DELETE")
+        success = result.get("order", {}).get("status") == "ok"
+        
+        if success:
+            print(f"✅ ORDER CANCELLED: {order_id}")
+        else:
+            print(f"❌ CANCEL FAILED: {order_id}")
+            
+        return success
+    except Exception as e:
+        print(f"[ERROR] Failed to cancel order {order_id}: {str(e)}")
+        return False
+
+
+def get_all_orders(status_filter: str = None) -> List[Dict]:
+    """Get all orders, optionally filtered by status"""
+    api = get_api_instance()
+    
+    try:
+        result = api.request(f"/accounts/{api.account_id}/orders")
+        orders = result.get("orders", {}).get("order", [])
+        
+        # Ensure orders is a list (API returns dict for single order)
+        if isinstance(orders, dict):
+            orders = [orders]
+        
+        # Filter by status if requested
+        if status_filter:
+            orders = [order for order in orders if order.get('status', '').lower() == status_filter.lower()]
+        
+        return orders
+    except Exception as e:
+        print(f"[ERROR] Failed to get orders: {str(e)}")
+        return []
+
 
 # === OCC Symbol Builder ===
 def get_option_symbol(symbol: str, strike: float, option_type: str, expiration_date=None) -> str:

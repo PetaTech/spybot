@@ -54,12 +54,12 @@ class LiveDataProvider(DataProvider):
                 
                 yield row
                 
-                # Wait before next data point
-                time.sleep(60)
+                # Wait before next data point (1-second for faster monitoring)
+                time.sleep(1)
                 
             except Exception as e:
                 print(f"Error getting data: {e}")
-                time.sleep(60)
+                time.sleep(5)  # Shorter retry delay for 1-second polling
     
     def get_option_chain(self, symbol: str, expiration_date: str, current_time=None) -> pd.DataFrame:
         """Get option chain from live API"""

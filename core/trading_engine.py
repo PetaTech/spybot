@@ -33,6 +33,9 @@ class Position:
     expiration_date: str = ""
     entry_time: datetime.datetime = None
     trade_id: int = field(default=None)  # Add trade_id to Position
+    entry_order_id: str = field(default=None)  # Entry order ID
+    limit_order_id: str = field(default=None)  # Limit sell order ID
+    limit_price: float = field(default=None)  # Limit sell price
 
 
 @dataclass
@@ -54,6 +57,22 @@ class OrderExecutor(ABC):
     def place_order(self, option_type: str, strike: float, contracts: int, 
                    action: str, expiration_date: str, price: Optional[float] = None) -> str:
         """Place an order and return order ID"""
+        pass
+    
+    @abstractmethod
+    def place_limit_order(self, option_type: str, strike: float, contracts: int, 
+                         action: str, expiration_date: str, limit_price: float) -> str:
+        """Place a limit order and return order ID"""
+        pass
+    
+    @abstractmethod
+    def get_order_status(self, order_id: str) -> Dict:
+        """Get order status"""
+        pass
+    
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an order"""
         pass
 
 
@@ -78,11 +97,61 @@ class BacktestOrderExecutor(OrderExecutor):
             'action': action,
             'expiration': expiration_date,
             'price': price,
+            'order_type': 'market',
+            'status': 'filled',
             'timestamp': datetime.datetime.now()
         }
         
         self.orders.append(order)
         return order_id
+    
+    def place_limit_order(self, option_type: str, strike: float, contracts: int, 
+                         action: str, expiration_date: str, limit_price: float) -> str:
+        """Track limit order for backtest analysis"""
+        self.order_counter += 1
+        order_id = f"BACKTEST_LIMIT_{self.order_counter:06d}"
+        
+        order = {
+            'id': order_id,
+            'type': option_type,
+            'strike': strike,
+            'contracts': contracts,
+            'action': action,
+            'expiration': expiration_date,
+            'price': limit_price,
+            'order_type': 'limit',
+            'status': 'open',
+            'timestamp': datetime.datetime.now()
+        }
+        
+        self.orders.append(order)
+        return order_id
+    
+    def get_order_status(self, order_id: str) -> Dict:
+        """Get order status for backtest"""
+        for order in self.orders:
+            if order['id'] == order_id:
+                return {
+                    'id': order_id,
+                    'status': order.get('status', 'open'),
+                    'state': order.get('status', 'open'),
+                    'filled_quantity': order['contracts'] if order.get('status') == 'filled' else 0,
+                    'remaining_quantity': 0 if order.get('status') == 'filled' else order['contracts'],
+                    'avg_fill_price': order.get('price', 0.0),
+                    'symbol': f"{order['type']}{order['strike']}",
+                    'side': order['action'],
+                    'price': order.get('price', 0.0),
+                    'type': order.get('order_type', 'market')
+                }
+        return {'id': order_id, 'status': 'not_found', 'state': 'not_found'}
+    
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel order for backtest"""
+        for order in self.orders:
+            if order['id'] == order_id:
+                order['status'] = 'cancelled'
+                return True
+        return False
     
     def get_orders(self):
         """Get all tracked orders"""
@@ -112,6 +181,31 @@ class PaperOrderExecutor(OrderExecutor):
         print(f"🔴 SANDBOX ORDER PLACED: {action} {contracts} {option_type} {strike} exp:{expiration_date} -> ID: {order_id}")
         
         return order_id
+    
+    def place_limit_order(self, option_type: str, strike: float, contracts: int, 
+                         action: str, expiration_date: str, limit_price: float) -> str:
+        """Place ACTUAL limit order in sandbox environment"""
+        # Import here to avoid circular imports
+        from utils.tradier_api import place_limit_order
+        
+        # Place real limit order in sandbox
+        order_id = place_limit_order(option_type, strike, contracts, action=action, 
+                                    expiration_date=expiration_date, limit_price=limit_price)
+        
+        # Log the order placement
+        print(f"🎯 SANDBOX LIMIT ORDER PLACED: {action} {contracts} {option_type} {strike} @ ${limit_price:.2f} -> ID: {order_id}")
+        
+        return order_id
+    
+    def get_order_status(self, order_id: str) -> Dict:
+        """Get ACTUAL order status from sandbox"""
+        from utils.tradier_api import get_order_status
+        return get_order_status(order_id)
+    
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel ACTUAL order in sandbox"""
+        from utils.tradier_api import cancel_order
+        return cancel_order(order_id)
 
 
 class LiveOrderExecutor(OrderExecutor):
@@ -129,6 +223,24 @@ class LiveOrderExecutor(OrderExecutor):
         from utils.tradier_api import place_order
         return place_order(option_type, strike, contracts, action=action, 
                           expiration_date=expiration_date, price=price)
+    
+    def place_limit_order(self, option_type: str, strike: float, contracts: int, 
+                         action: str, expiration_date: str, limit_price: float) -> str:
+        """Place limit order using live API"""
+        # Import here to avoid circular imports
+        from utils.tradier_api import place_limit_order
+        return place_limit_order(option_type, strike, contracts, action=action, 
+                                expiration_date=expiration_date, limit_price=limit_price)
+    
+    def get_order_status(self, order_id: str) -> Dict:
+        """Get order status from live API"""
+        from utils.tradier_api import get_order_status
+        return get_order_status(order_id)
+    
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel order using live API"""
+        from utils.tradier_api import cancel_order
+        return cancel_order(order_id)
 
 
 class DataProvider(ABC):
@@ -222,7 +334,7 @@ class TradingEngine:
         self.low_vol_move_threshold = config.get('LOW_VOL_MOVE_THRESHOLD', 2.5)
         self.low_vol_premium_min = config.get('LOW_VOL_PREMIUM_MIN', 0.40)
         self.low_vol_premium_max = config.get('LOW_VOL_PREMIUM_MAX', 1.05)
-        self.low_vol_profit_target = config.get('LOW_VOL_PROFIT_TARGET', 1.35)
+        self.low_vol_profit_target = config.get('LOW_VOL_PROFIT_TARGET', 1.25)
         
         # State tracking
         self.active_trades: List[List[Position]] = []
@@ -231,6 +343,11 @@ class TradingEngine:
         self.last_flagged_time = None
         self.last_early_signal_time = None  # Track early signals for cooldown
         self.price_log: List[Tuple[datetime.datetime, float]] = []
+        
+        # Limit order tracking
+        self.active_limit_orders: Dict[str, Dict] = {}  # order_id -> order info
+        self.last_order_check_time = None  # Track when we last checked order status
+        self.order_check_interval = 3  # Check order status every 3 seconds
         
         # Daily tracking
         self.daily_trades = 0
@@ -380,6 +497,9 @@ class TradingEngine:
         self.log(f"📊 Processing: SPY=${market_row.close:.2f} | Move: {move_percent:.2f}% ({absolute_move:.2f}pts) | Active trades: {len(self.active_trades)}")
         
         print(f"[ENGINE DEBUG] Move calculation: {move_percent:.2f}% ({absolute_move:.2f} points)")
+        
+        # Check limit order status first (every 3 seconds)
+        self.check_limit_order_fills(market_row.current_time)
         
         # ALWAYS check for exits on all active trades (even during buffer periods)
         if self.active_trades:
@@ -1075,16 +1195,41 @@ class TradingEngine:
         return []
     
     def execute_entry(self, positions: List[Position], expiration: str) -> bool:
-        """Execute entry orders"""
+        """Execute entry orders and immediately place limit sell orders"""
         if not self.order_executor:
             return False
         try:
             for pos in positions:
-                order_id = self.order_executor.place_order(
+                # Place entry order (market buy)
+                entry_order_id = self.order_executor.place_order(
                     pos.type, pos.strike, pos.contracts,
                     action="BUY", expiration_date=expiration
                 )
-                self.log(f"ENTRY {pos.type} Strike={pos.strike} Qty={pos.contracts} Price={pos.entry_price:.2f} OrderID={order_id}")
+                pos.entry_order_id = entry_order_id
+                
+                # Calculate limit sell price using VIX-based profit target
+                limit_price = pos.entry_price * self.profit_target
+                pos.limit_price = limit_price
+                
+                # Place limit sell order immediately
+                limit_order_id = self.order_executor.place_limit_order(
+                    pos.type, pos.strike, pos.contracts,
+                    action="SELL", expiration_date=expiration, limit_price=limit_price
+                )
+                pos.limit_order_id = limit_order_id
+                
+                # Track the limit order
+                self.active_limit_orders[limit_order_id] = {
+                    'position': pos,
+                    'trade_positions': positions,  # Reference to full trade
+                    'expiration': expiration,
+                    'target_price': limit_price,
+                    'placed_time': datetime.datetime.now()
+                }
+                
+                self.log(f"ENTRY {pos.type} Strike={pos.strike} Qty={pos.contracts} Price={pos.entry_price:.2f} EntryOrderID={entry_order_id}")
+                self.log(f"🎯 LIMIT SELL ORDER PLACED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} ({self.profit_target:.2f}x target) LimitOrderID={limit_order_id}")
+            
             self.total_trades += 1  # Increment total trades on entry
             return True
         except Exception as e:
@@ -1092,10 +1237,14 @@ class TradingEngine:
             return False
     
     def execute_exit(self, positions: List[Position], expiration: str) -> bool:
-        """Execute exit orders"""
+        """Execute exit orders and cancel any pending limit orders"""
         if not self.order_executor:
             return False
         try:
+            # First, cancel all limit orders for this trade
+            self.cancel_trade_limit_orders(positions)
+            
+            # Then place market sell orders
             for pos in positions:
                 order_id = self.order_executor.place_order(
                     pos.type, pos.strike, pos.contracts,
@@ -1137,6 +1286,115 @@ class TradingEngine:
         except Exception as e:
             self.log(f"❌ Error checking combined profit exit: {e}")
             return False
+
+    def check_limit_order_fills(self, current_time: datetime.datetime):
+        """Check if any limit orders have been filled and handle automatic closure"""
+        # Only check every few seconds to avoid hitting API limits
+        if (self.last_order_check_time is None or 
+            (current_time - self.last_order_check_time).total_seconds() >= self.order_check_interval):
+            
+            self.last_order_check_time = current_time
+            
+            if not self.active_limit_orders:
+                return
+            
+            self.log(f"🔍 CHECKING LIMIT ORDERS: {len(self.active_limit_orders)} active orders")
+            
+            filled_orders = []
+            
+            for order_id, order_info in self.active_limit_orders.items():
+                try:
+                    status = self.order_executor.get_order_status(order_id)
+                    
+                    # Check if order is filled (completely or partially)
+                    if status.get('status', '').lower() in ['filled', 'partially_filled'] or status.get('filled_quantity', 0) > 0:
+                        filled_orders.append(order_id)
+                        filled_position = order_info['position']
+                        trade_positions = order_info['trade_positions']
+                        expiration = order_info['expiration']
+                        
+                        self.log(f"🎯 LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
+                        self.log(f"🎯 Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
+                        
+                        # Find trade index to remove
+                        trade_index = None
+                        for i, trade in enumerate(self.active_trades):
+                            if any(pos.trade_id == filled_position.trade_id for pos in trade if hasattr(pos, 'trade_id')):
+                                trade_index = i
+                                break
+                        
+                        if trade_index is not None:
+                            # Cancel all other limit orders for this trade
+                            self.cancel_trade_limit_orders(trade_positions, exclude_order_id=order_id)
+                            
+                            # Market sell the remaining position(s)
+                            remaining_positions = [pos for pos in trade_positions if pos.limit_order_id != order_id]
+                            if remaining_positions:
+                                self.log(f"📈 MARKET SELLING REMAINING POSITIONS: {len(remaining_positions)} positions")
+                                for remaining_pos in remaining_positions:
+                                    try:
+                                        market_order_id = self.order_executor.place_order(
+                                            remaining_pos.type, remaining_pos.strike, remaining_pos.contracts,
+                                            action="SELL", expiration_date=expiration
+                                        )
+                                        self.log(f"📈 MARKET SELL: {remaining_pos.type} Strike={remaining_pos.strike} OrderID={market_order_id}")
+                                    except Exception as e:
+                                        self.log(f"❌ Failed to market sell remaining position: {e}")
+                            
+                            # Calculate P&L for the filled trade
+                            entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)
+                            entry_commission = self.calculate_total_trade_cost(trade_positions, is_exit=False)
+                            
+                            # For the filled position, use the actual fill price
+                            filled_value = status.get('avg_fill_price', filled_position.limit_price) * 100 * filled_position.contracts
+                            
+                            # For remaining positions, estimate exit value at current bid
+                            remaining_exit_value = 0
+                            if remaining_positions:
+                                remaining_exit_value = self.calculate_exit_value(remaining_positions, expiration, current_time)
+                            
+                            total_exit_value = filled_value + remaining_exit_value
+                            exit_commission = self.calculate_total_trade_cost(trade_positions, is_exit=True)
+                            
+                            trade_pnl = total_exit_value - entry_cost - entry_commission - exit_commission
+                            
+                            self.log(f"✅ LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
+                            
+                            # Update metrics
+                            self.update_daily_pnl(trade_pnl)
+                            self.update_trade_metrics(trade_pnl)
+                            
+                            # Remove the trade from active trades
+                            self.active_trades.pop(trade_index)
+                            self.trade_entry_times.pop(trade_index)
+                            
+                        else:
+                            self.log(f"⚠️ Could not find trade index for filled limit order {order_id}")
+                
+                except Exception as e:
+                    self.log(f"❌ Error checking limit order {order_id}: {e}")
+                    # If we can't check the order status, keep it in tracking for now
+                    # It will be cleaned up in finish() if needed
+            
+            # Remove filled orders from tracking
+            for order_id in filled_orders:
+                if order_id in self.active_limit_orders:
+                    del self.active_limit_orders[order_id]
+    
+    def cancel_trade_limit_orders(self, trade_positions: List[Position], exclude_order_id: str = None):
+        """Cancel all limit orders for a trade, optionally excluding one order"""
+        for pos in trade_positions:
+            if pos.limit_order_id and pos.limit_order_id != exclude_order_id:
+                try:
+                    if self.order_executor.cancel_order(pos.limit_order_id):
+                        self.log(f"✅ CANCELLED LIMIT ORDER: {pos.type} Strike={pos.strike} OrderID={pos.limit_order_id}")
+                        # Remove from tracking
+                        if pos.limit_order_id in self.active_limit_orders:
+                            del self.active_limit_orders[pos.limit_order_id]
+                    else:
+                        self.log(f"⚠️ FAILED TO CANCEL LIMIT ORDER: {pos.limit_order_id}")
+                except Exception as e:
+                    self.log(f"❌ Error cancelling limit order {pos.limit_order_id}: {e}")
 
     def check_all_exit_conditions(self, current_time: datetime.datetime) -> List[int]:
         trades_to_exit = []
@@ -1433,6 +1691,22 @@ class TradingEngine:
 
     def finish(self):
         """Call this when trading is finished (end of data or user interrupt) to log final results."""
+        # Cancel any remaining limit orders before finishing
+        if self.active_limit_orders:
+            self.log(f"🧹 CLEANUP: Cancelling {len(self.active_limit_orders)} remaining limit orders...")
+            for order_id, order_info in list(self.active_limit_orders.items()):
+                try:
+                    if self.order_executor.cancel_order(order_id):
+                        self.log(f"✅ CLEANUP: Cancelled limit order {order_id}")
+                    else:
+                        self.log(f"⚠️ CLEANUP: Could not cancel limit order {order_id}")
+                except Exception as e:
+                    self.log(f"❌ CLEANUP ERROR: Failed to cancel {order_id}: {e}")
+            
+            # Clear the tracking
+            self.active_limit_orders.clear()
+            self.log(f"🧹 CLEANUP COMPLETE: All limit orders processed")
+        
         self.log_final_results()
 
     def get_market_timing_status(self, current_time: datetime.datetime) -> Dict:
