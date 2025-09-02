@@ -242,7 +242,7 @@ def place_limit_order(option_type: str, strike: float, contracts: int,
         "side": side,
         "quantity": contracts,
         "type": "limit",  # LIMIT order instead of market
-        "price": limit_price,  # Limit price
+        "price": f"{limit_price:.2f}",  # Limit price formatted to 2 decimal places
         "duration": "day"
     }
 

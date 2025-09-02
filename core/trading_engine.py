@@ -1208,7 +1208,9 @@ class TradingEngine:
                 pos.entry_order_id = entry_order_id
                 
                 # Calculate limit sell price using VIX-based profit target
-                limit_price = pos.entry_price * self.profit_target
+                self.log(f"[DEBUG] VIX regime: {getattr(self, '_vix_regime', 'unknown')}, profit_target: {getattr(self, 'profit_target', 'not set')}")
+                profit_multiplier = getattr(self, 'profit_target', 1.35)  # Default to 1.35 if not set
+                limit_price = round(pos.entry_price * profit_multiplier, 2)
                 pos.limit_price = limit_price
                 
                 # Place limit sell order immediately
@@ -1218,17 +1220,22 @@ class TradingEngine:
                 )
                 pos.limit_order_id = limit_order_id
                 
-                # Track the limit order
-                self.active_limit_orders[limit_order_id] = {
-                    'position': pos,
-                    'trade_positions': positions,  # Reference to full trade
-                    'expiration': expiration,
-                    'target_price': limit_price,
-                    'placed_time': datetime.datetime.now()
-                }
+                # Track the limit order only if it was successfully placed
+                if limit_order_id != "FAILED":
+                    self.active_limit_orders[limit_order_id] = {
+                        'position': pos,
+                        'trade_positions': positions,  # Reference to full trade
+                        'expiration': expiration,
+                        'target_price': limit_price,
+                        'placed_time': datetime.datetime.now()
+                    }
                 
                 self.log(f"ENTRY {pos.type} Strike={pos.strike} Qty={pos.contracts} Price={pos.entry_price:.2f} EntryOrderID={entry_order_id}")
-                self.log(f"🎯 LIMIT SELL ORDER PLACED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} ({self.profit_target:.2f}x target) LimitOrderID={limit_order_id}")
+                
+                if limit_order_id != "FAILED":
+                    self.log(f"🎯 LIMIT SELL ORDER PLACED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} ({profit_multiplier:.2f}x target) LimitOrderID={limit_order_id}")
+                else:
+                    self.log(f"❌ LIMIT SELL ORDER FAILED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} - will use manual exits only")
             
             self.total_trades += 1  # Increment total trades on entry
             return True
