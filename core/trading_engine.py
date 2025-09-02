@@ -1308,7 +1308,7 @@ class TradingEngine:
             
             filled_orders = []
             
-            for order_id, order_info in self.active_limit_orders.items():
+            for order_id, order_info in list(self.active_limit_orders.items()):
                 try:
                     status = self.order_executor.get_order_status(order_id)
                     
