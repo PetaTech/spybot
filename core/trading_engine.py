@@ -1208,7 +1208,6 @@ class TradingEngine:
                 pos.entry_order_id = entry_order_id
                 
                 # Calculate limit sell price using VIX-based profit target
-                self.log(f"[DEBUG] VIX regime: {getattr(self, '_vix_regime', 'unknown')}, profit_target: {getattr(self, 'profit_target', 'not set')}")
                 profit_multiplier = getattr(self, 'profit_target', 1.35)  # Default to 1.35 if not set
                 limit_price = round(pos.entry_price * profit_multiplier, 2)
                 pos.limit_price = limit_price
@@ -1703,12 +1702,22 @@ class TradingEngine:
             self.log(f"🧹 CLEANUP: Cancelling {len(self.active_limit_orders)} remaining limit orders...")
             for order_id, order_info in list(self.active_limit_orders.items()):
                 try:
+                    # First check if order is still cancellable
+                    status = self.order_executor.get_order_status(order_id)
+                    if status.get('status', '').lower() in ['filled', 'cancelled']:
+                        self.log(f"🔍 CLEANUP: Order {order_id} already {status.get('status', 'unknown')}, skipping cancel")
+                        continue
+                        
                     if self.order_executor.cancel_order(order_id):
                         self.log(f"✅ CLEANUP: Cancelled limit order {order_id}")
                     else:
                         self.log(f"⚠️ CLEANUP: Could not cancel limit order {order_id}")
                 except Exception as e:
-                    self.log(f"❌ CLEANUP ERROR: Failed to cancel {order_id}: {e}")
+                    # Don't log as error if order was already filled/cancelled
+                    if "400" in str(e):
+                        self.log(f"🔍 CLEANUP: Order {order_id} likely already filled/cancelled")
+                    else:
+                        self.log(f"❌ CLEANUP ERROR: Failed to cancel {order_id}: {e}")
             
             # Clear the tracking
             self.active_limit_orders.clear()
