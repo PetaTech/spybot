@@ -314,6 +314,15 @@ def cancel_order(order_id: str) -> bool:
     api = get_api_instance()
     
     try:
+        # First check order status to see if it can be cancelled
+        status_info = get_order_status(order_id)
+        order_status = status_info.get('status', '').lower()
+        
+        # Don't try to cancel orders that are already filled, cancelled, or expired
+        if order_status in ['filled', 'cancelled', 'expired', 'rejected']:
+            print(f"🔍 ORDER {order_id} already {order_status.upper()}, skipping cancel")
+            return True  # Return True since the order is already in a terminal state
+        
         result = api.request(f"/accounts/{api.account_id}/orders/{order_id}", method="DELETE")
         success = result.get("order", {}).get("status") == "ok"
         
@@ -324,8 +333,14 @@ def cancel_order(order_id: str) -> bool:
             
         return success
     except Exception as e:
-        print(f"[ERROR] Failed to cancel order {order_id}: {str(e)}")
-        return False
+        error_str = str(e)
+        # Check if it's a 400 error indicating order can't be cancelled
+        if "400" in error_str:
+            print(f"🔍 ORDER {order_id} cannot be cancelled (already filled/expired)")
+            return True  # Treat as success since order is likely already processed
+        else:
+            print(f"[ERROR] Failed to cancel order {order_id}: {error_str}")
+            return False
 
 
 def get_all_orders(status_filter: str = None) -> List[Dict]:

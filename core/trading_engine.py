@@ -626,6 +626,11 @@ class TradingEngine:
                         holding_time_minutes = (market_row.current_time - entry_time).total_seconds() / 60
                         holding_time = f"{holding_time_minutes:.1f} minutes"
                         
+                        # Calculate win rate
+                        total_completed_trades = self.total_trades
+                        wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl', 0) > 0)
+                        win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
+                        
                         exit_data = {
                             'trade_id': trade_id,
                             'exit_time': market_row.current_time,
@@ -641,6 +646,8 @@ class TradingEngine:
                             'daily_pnl': self.daily_pnl,
                             'daily_trades': self.daily_trades,
                             'total_trades': self.total_trades,
+                            'win_rate': win_rate,
+                            'total_pnl': self.total_pnl,
                             'timing_status': self.get_market_timing_status(market_row.current_time)
                         }
                         self._send_exit_alert(exit_data)
@@ -1529,6 +1536,11 @@ class TradingEngine:
                             holding_time_minutes = (current_time - entry_time).total_seconds() / 60
                             holding_time = f"{holding_time_minutes:.1f} minutes"
                             
+                            # Calculate win rate
+                            total_completed_trades = self.total_trades
+                            wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl', 0) > 0)
+                            win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
+                            
                             exit_data = {
                                 'trade_id': trade_id,
                                 'exit_time': current_time,
@@ -1544,6 +1556,8 @@ class TradingEngine:
                                 'daily_pnl': self.daily_pnl,
                                 'daily_trades': self.daily_trades,
                                 'total_trades': self.total_trades,
+                                'win_rate': win_rate,
+                                'total_pnl': self.total_pnl,
                                 'filled_position': filled_position,
                                 'fill_price': status.get('avg_fill_price', filled_position.limit_price),
                                 'timing_status': self.get_market_timing_status(current_time)
