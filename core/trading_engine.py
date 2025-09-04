@@ -387,6 +387,65 @@ class TradingEngine:
         # Add a list to store detailed signal/trade logs
         self.signal_trade_log = []
         self.trade_id_counter = 0  # Unique trade ID for each signal
+        
+        # Initialize Telegram notifications
+        self.telegram_notifier = None
+        self.account_holder_name = "Trading Account"
+        self._init_telegram_notifications()
+    
+    def _init_telegram_notifications(self):
+        """Initialize Telegram notifications if enabled"""
+        try:
+            from config.telegram import (
+                TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED,
+                SEND_SIGNAL_ALERTS, SEND_ENTRY_ALERTS, SEND_EXIT_ALERTS,
+                SEND_LIMIT_HIT_ALERTS, SEND_STOP_LOSS_ALERTS, 
+                SEND_DAILY_LIMIT_ALERTS, SEND_SYSTEM_ALERTS
+            )
+            from utils.telegram_bot import TelegramNotifier, TelegramConfig
+            
+            if TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN != "YOUR_BOT_TOKEN_HERE":
+                # Get account holder name
+                if self.mode in ['live', 'paper']:
+                    try:
+                        from utils.tradier_api import get_account_profile
+                        profile = get_account_profile()
+                        self.account_holder_name = profile['name']
+                    except Exception as e:
+                        self.log(f"[TELEGRAM] Could not fetch account name: {e}")
+                
+                # Initialize Telegram notifier
+                config = TelegramConfig(
+                    bot_token=TELEGRAM_BOT_TOKEN,
+                    chat_id=TELEGRAM_CHAT_ID,
+                    enabled=TELEGRAM_ENABLED
+                )
+                
+                self.telegram_notifier = TelegramNotifier(config, self.account_holder_name)
+                
+                # Store notification preferences
+                self.telegram_settings = {
+                    'signal_alerts': SEND_SIGNAL_ALERTS,
+                    'entry_alerts': SEND_ENTRY_ALERTS, 
+                    'exit_alerts': SEND_EXIT_ALERTS,
+                    'limit_hit_alerts': SEND_LIMIT_HIT_ALERTS,
+                    'stop_loss_alerts': SEND_STOP_LOSS_ALERTS,
+                    'daily_limit_alerts': SEND_DAILY_LIMIT_ALERTS,
+                    'system_alerts': SEND_SYSTEM_ALERTS
+                }
+                
+                self.log(f"[TELEGRAM] Initialized for account: {self.account_holder_name}")
+                
+                # Send system start alert
+                if self.telegram_settings['system_alerts']:
+                    self._send_system_start_alert()
+            else:
+                self.log("[TELEGRAM] Disabled or not configured")
+                
+        except ImportError:
+            self.log("[TELEGRAM] Configuration not found, notifications disabled")
+        except Exception as e:
+            self.log(f"[TELEGRAM] Initialization failed: {e}")
     
     def setup_logging(self):
         """Setup logging infrastructure"""
@@ -1901,3 +1960,73 @@ class TradingEngine:
             else:
                 vix_str = f"{vix:.2f}" if vix is not None else "None"
                 self.log(f"[VIX] Refreshed: VIX={vix_str}, regime={self._vix_regime} (no changes)")
+    
+    # === Telegram Alert Methods ===
+    
+    def _send_system_start_alert(self):
+        """Send system start alert to Telegram"""
+        if not self.telegram_notifier:
+            return
+            
+        status_data = {
+            'status': 'started',
+            'timestamp': datetime.datetime.now(),
+            'mode': self.mode,
+            'market_status': 'OPEN',  # Could be enhanced with actual market status
+            'vix_regime': getattr(self, '_vix_regime', 'Unknown'),
+            'risk_per_side': self.risk_per_side,
+            'total_risk': self.risk_per_side * 2
+        }
+        
+        self.telegram_notifier.send_system_status_alert(status_data)
+    
+    def _send_signal_alert(self, signal_data):
+        """Send signal detection alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('signal_alerts', False)):
+            return
+            
+        self.telegram_notifier.send_signal_alert(signal_data)
+    
+    def _send_entry_alert(self, entry_data):
+        """Send trade entry alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('entry_alerts', False)):
+            return
+            
+        self.telegram_notifier.send_entry_alert(entry_data)
+    
+    def _send_limit_hit_alert(self, limit_data):
+        """Send limit order fill alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('limit_hit_alerts', False)):
+            return
+            
+        self.telegram_notifier.send_limit_hit_alert(limit_data)
+    
+    def _send_exit_alert(self, exit_data):
+        """Send trade exit alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('exit_alerts', False)):
+            return
+            
+        self.telegram_notifier.send_exit_alert(exit_data)
+    
+    def _send_stop_loss_alert(self, stop_data):
+        """Send stop loss alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('stop_loss_alerts', False)):
+            return
+            
+        self.telegram_notifier.send_stop_loss_alert(stop_data)
+    
+    def _send_system_stop_alert(self):
+        """Send system stop alert to Telegram"""
+        if not (self.telegram_notifier and self.telegram_settings.get('system_alerts', False)):
+            return
+            
+        status_data = {
+            'status': 'stopped',
+            'timestamp': datetime.datetime.now(),
+            'mode': self.mode,
+            'market_status': 'CLOSED',
+            'final_pnl': getattr(self, 'total_pnl', 0),
+            'total_trades': getattr(self, 'total_trades', 0)
+        }
+        
+        self.telegram_notifier.send_system_status_alert(status_data)

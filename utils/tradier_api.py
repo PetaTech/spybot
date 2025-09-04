@@ -139,6 +139,31 @@ def place_order(option_type: str, strike: float, contracts: int,
         print(f"[ERROR] Order failed: {str(e)}")
         return "FAILED"
 
+def get_account_profile():
+    """Get account profile including account holder name"""
+    api = get_api_instance()
+    
+    try:
+        profile_data = api.request(f"/accounts/{api.account_id}/profile")
+        profile = profile_data.get('profile', {})
+        
+        return {
+            'name': profile.get('name', 'Unknown Account'),
+            'account_number': profile.get('account_number', api.account_id),
+            'day_trader': profile.get('day_trader', False),
+            'account_type': profile.get('type', 'unknown'),
+            'status': profile.get('status', 'unknown')
+        }
+    except Exception as e:
+        print(f"[ERROR] Failed to get account profile: {e}")
+        return {
+            'name': f'Account {api.account_id}',
+            'account_number': api.account_id,
+            'day_trader': False,
+            'account_type': 'unknown', 
+            'status': 'unknown'
+        }
+
 def test_connection():
     """Test connection to Tradier API and check account status"""
     api = get_api_instance()
