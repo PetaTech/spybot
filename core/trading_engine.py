@@ -603,9 +603,6 @@ class TradingEngine:
                         result['exit_commission'] = exit_commission
                         result['pnl'] = trade_pnl
                         
-                        self.update_daily_pnl(trade_pnl)
-                        self.update_trade_metrics(trade_pnl)
-                        
                         # Update analytics log with real exit values
                         if trade_id is not None:
                             for entry in reversed(self.signal_trade_log):
@@ -620,6 +617,10 @@ class TradingEngine:
                         self.trade_entry_times.pop(trade_index)
                         
                         self.log(f"✅ Trade #{trade_index + 1} EXIT COMPLETE. P&L: ${trade_pnl:.2f} (Entry: ${entry_cost:.2f} + ${entry_commission:.2f}, Exit: ${exit_value:.2f} - ${exit_commission:.2f})")
+                        
+                        # Update metrics BEFORE sending alert to get current values
+                        self.update_daily_pnl(trade_pnl)
+                        self.update_trade_metrics(trade_pnl)
                         
                         # Send Telegram trade exit alert
                         trade_id = getattr(trade_positions[0], 'trade_id', trade_index + 1) if trade_positions else trade_index + 1
@@ -1530,6 +1531,10 @@ class TradingEngine:
                             
                             self.log(f"✅ LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
                             
+                            # Update metrics BEFORE sending alert to get current values
+                            self.update_daily_pnl(trade_pnl)
+                            self.update_trade_metrics(trade_pnl)
+                            
                             # Send Telegram trade exit alert
                             trade_id = getattr(filled_position, 'trade_id', trade_index + 1) if hasattr(filled_position, 'trade_id') else trade_index + 1
                             entry_time = self.trade_entry_times[trade_index] if trade_index is not None and trade_index < len(self.trade_entry_times) else current_time
@@ -1563,10 +1568,6 @@ class TradingEngine:
                                 'timing_status': self.get_market_timing_status(current_time)
                             }
                             self._send_exit_alert(exit_data)
-                            
-                            # Update metrics
-                            self.update_daily_pnl(trade_pnl)
-                            self.update_trade_metrics(trade_pnl)
                             
                             # Remove the trade from active trades
                             self.active_trades.pop(trade_index)
