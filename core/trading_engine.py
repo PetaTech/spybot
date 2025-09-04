@@ -631,7 +631,7 @@ class TradingEngine:
                             'total_exit_value': exit_value,
                             'exit_commission': exit_commission,
                             'trade_pnl': trade_pnl,
-                            'timing_status': self.get_timing_status(market_row.current_time)
+                            'timing_status': self.get_market_timing_status(market_row.current_time)
                         }
                         self._send_exit_alert(exit_data)
                         
@@ -727,7 +727,7 @@ class TradingEngine:
                                     'entry_commission': entry_commission,
                                     'total_entry_cost': total_entry_cost,
                                     'daily_trades': len(self.active_trades),
-                                    'timing_status': self.get_timing_status(market_row.current_time)
+                                    'timing_status': self.get_market_timing_status(market_row.current_time)
                                 }
                                 self._send_entry_alert(entry_data)
                                 
@@ -1430,7 +1430,7 @@ class TradingEngine:
                             'order_status': status,
                             'fill_price': status.get('avg_fill_price', filled_position.limit_price),
                             'filled_quantity': status.get('filled_quantity', 0),
-                            'timing_status': self.get_timing_status(current_time)
+                            'timing_status': self.get_market_timing_status(current_time)
                         }
                         self._send_limit_hit_alert(limit_fill_data)
                         
@@ -1490,7 +1490,7 @@ class TradingEngine:
                                 'trade_pnl': trade_pnl,
                                 'filled_position': filled_position,
                                 'fill_price': status.get('avg_fill_price', filled_position.limit_price),
-                                'timing_status': self.get_timing_status(current_time)
+                                'timing_status': self.get_market_timing_status(current_time)
                             }
                             self._send_exit_alert(exit_data)
                             
@@ -1761,7 +1761,8 @@ class TradingEngine:
         self.log(f"🔄 Active Trades: {len(self.active_trades)}")
         if self.active_trades:
             for i, (positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
-                hold_time = (datetime.datetime.now() - entry_time).total_seconds() / 60
+                import datetime as dt
+                hold_time = (dt.datetime.now() - entry_time).total_seconds() / 60
                 self.log(f"   Trade {i+1}: {len(positions)} positions, held for {hold_time:.1f} minutes")
         
         # Log files
@@ -1981,7 +1982,7 @@ class TradingEngine:
                         'exit_value': exit_value,
                         'estimated_loss': estimated_loss,
                         'stop_loss_limit': self.stop_loss_percentage,
-                        'timing_status': self.get_timing_status(current_time)
+                        'timing_status': self.get_market_timing_status(current_time)
                     }
                     self._send_stop_loss_alert(stop_data)
                     
@@ -2006,7 +2007,7 @@ class TradingEngine:
                 'daily_pnl': self.daily_pnl,
                 'emergency_stop_limit': self.emergency_stop_loss,
                 'active_trades': len(self.active_trades),
-                'timing_status': self.get_timing_status(current_time)
+                'timing_status': self.get_market_timing_status(current_time)
             }
             self._send_stop_loss_alert(emergency_stop_data)
             
