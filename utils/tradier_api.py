@@ -144,7 +144,8 @@ def get_account_profile():
     api = get_api_instance()
     
     try:
-        profile_data = api.request(f"/accounts/{api.account_id}/profile")
+        # Try the user profile endpoint instead of account profile
+        profile_data = api.request(f"/user/profile")
         profile = profile_data.get('profile', {})
         
         return {
