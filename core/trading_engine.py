@@ -621,6 +621,20 @@ class TradingEngine:
                         
                         self.log(f"✅ Trade #{trade_index + 1} EXIT COMPLETE. P&L: ${trade_pnl:.2f} (Entry: ${entry_cost:.2f} + ${entry_commission:.2f}, Exit: ${exit_value:.2f} - ${exit_commission:.2f})")
                         
+                        # Send Telegram trade exit alert
+                        exit_data = {
+                            'exit_time': market_row.current_time,
+                            'positions': trade_positions,
+                            'exit_reason': 'Manual Exit',
+                            'entry_cost': entry_cost,
+                            'entry_commission': entry_commission,
+                            'total_exit_value': exit_value,
+                            'exit_commission': exit_commission,
+                            'trade_pnl': trade_pnl,
+                            'timing_status': self.get_timing_status(market_row.current_time)
+                        }
+                        self._send_exit_alert(exit_data)
+                        
                         # Log comprehensive exit result
                         self.log_comprehensive_result(result)
                         # Update analytics log for forced exit
@@ -654,6 +668,20 @@ class TradingEngine:
                 result['signal_detected'] = True
                 self.total_signals += 1
                 self.log(f"🎯 SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                
+                # Send signal alert to Telegram
+                signal_data = {
+                    'detection_time': market_row.current_time,
+                    'condition': f"Move {move_percent:.2f}% in window, signal detected",
+                    'market_price': market_row.close,
+                    'move_percent': move_percent,
+                    'move_points': absolute_move,
+                    'vix_regime': getattr(self, '_vix_regime', 'Unknown'),
+                    'vix_value': getattr(self, '_vix_value', None),
+                    'active_trades': len(self.active_trades),
+                    'symbol': market_row.symbol
+                }
+                self._send_signal_alert(signal_data)
                 
                 # Check entry conditions
                 self.log(f"🔍 Checking entry conditions...")
@@ -689,6 +717,20 @@ class TradingEngine:
                                 
                                 self.increment_daily_trades()
                                 self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
+                                
+                                # Send Telegram entry alert
+                                entry_data = {
+                                    'entry_time': market_row.current_time,
+                                    'positions': positions,
+                                    'market_price': market_row.close,
+                                    'entry_cost': entry_cost,
+                                    'entry_commission': entry_commission,
+                                    'total_entry_cost': total_entry_cost,
+                                    'daily_trades': len(self.active_trades),
+                                    'timing_status': self.get_timing_status(market_row.current_time)
+                                }
+                                self._send_entry_alert(entry_data)
+                                
                                 self.log_comprehensive_result(result)
                             else:
                                 result['action'] = 'entry_failed'
@@ -1381,6 +1423,17 @@ class TradingEngine:
                         self.log(f"🎯 LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
                         self.log(f"🎯 Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
                         
+                        # Send Telegram limit order fill alert
+                        limit_fill_data = {
+                            'fill_time': current_time,
+                            'filled_position': filled_position,
+                            'order_status': status,
+                            'fill_price': status.get('avg_fill_price', filled_position.limit_price),
+                            'filled_quantity': status.get('filled_quantity', 0),
+                            'timing_status': self.get_timing_status(current_time)
+                        }
+                        self._send_limit_hit_alert(limit_fill_data)
+                        
                         # Find trade index to remove
                         trade_index = None
                         for i, trade in enumerate(self.active_trades):
@@ -1424,6 +1477,22 @@ class TradingEngine:
                             trade_pnl = total_exit_value - entry_cost - entry_commission - exit_commission
                             
                             self.log(f"✅ LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
+                            
+                            # Send Telegram trade exit alert
+                            exit_data = {
+                                'exit_time': current_time,
+                                'positions': trade_positions,
+                                'exit_reason': 'Limit Order Fill',
+                                'entry_cost': entry_cost,
+                                'entry_commission': entry_commission,
+                                'total_exit_value': total_exit_value,
+                                'exit_commission': exit_commission,
+                                'trade_pnl': trade_pnl,
+                                'filled_position': filled_position,
+                                'fill_price': status.get('avg_fill_price', filled_position.limit_price),
+                                'timing_status': self.get_timing_status(current_time)
+                            }
+                            self._send_exit_alert(exit_data)
                             
                             # Update metrics
                             self.update_daily_pnl(trade_pnl)
@@ -1901,6 +1970,21 @@ class TradingEngine:
                 if loss_percentage >= self.stop_loss_percentage:
                     self.log(f"🛑 STOP LOSS TRIGGERED! Loss: {loss_percentage:.1f}% >= {self.stop_loss_percentage:.1f}%")
                     self.log(f"   Entry Cost: ${total_entry_cost:.2f}, Exit Value: ${exit_value:.2f}")
+                    
+                    # Send Telegram stop loss alert
+                    estimated_loss = total_entry_cost - exit_value
+                    stop_data = {
+                        'trigger_time': current_time,
+                        'positions': positions,
+                        'loss_percent': loss_percentage,
+                        'entry_cost': total_entry_cost,
+                        'exit_value': exit_value,
+                        'estimated_loss': estimated_loss,
+                        'stop_loss_limit': self.stop_loss_percentage,
+                        'timing_status': self.get_timing_status(current_time)
+                    }
+                    self._send_stop_loss_alert(stop_data)
+                    
                     return True
                 else:
                     self.log(f"⏳ Stop loss check: {loss_percentage:.1f}% < {self.stop_loss_percentage:.1f}%")
@@ -1915,6 +1999,17 @@ class TradingEngine:
         """Check if emergency stop-loss condition is met (total daily loss)"""
         if self.daily_pnl <= -self.emergency_stop_loss:
             self.log(f"🚨 EMERGENCY STOP LOSS TRIGGERED! Daily P&L: ${self.daily_pnl:.2f} <= -${self.emergency_stop_loss}")
+            
+            # Send Telegram emergency stop loss alert
+            emergency_stop_data = {
+                'trigger_time': current_time,
+                'daily_pnl': self.daily_pnl,
+                'emergency_stop_limit': self.emergency_stop_loss,
+                'active_trades': len(self.active_trades),
+                'timing_status': self.get_timing_status(current_time)
+            }
+            self._send_stop_loss_alert(emergency_stop_data)
+            
             return True
         return False
 
