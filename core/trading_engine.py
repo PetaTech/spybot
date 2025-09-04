@@ -624,7 +624,7 @@ class TradingEngine:
                         # Send Telegram trade exit alert
                         exit_data = {
                             'exit_time': market_row.current_time,
-                            'positions': trade_positions,
+                            'positions': self._positions_to_dict(trade_positions),
                             'exit_reason': 'Manual Exit',
                             'entry_cost': entry_cost,
                             'entry_commission': entry_commission,
@@ -721,7 +721,7 @@ class TradingEngine:
                                 # Send Telegram entry alert
                                 entry_data = {
                                     'entry_time': market_row.current_time,
-                                    'positions': positions,
+                                    'positions': self._positions_to_dict(positions),
                                     'market_price': market_row.close,
                                     'entry_cost': entry_cost,
                                     'entry_commission': entry_commission,
@@ -1481,7 +1481,7 @@ class TradingEngine:
                             # Send Telegram trade exit alert
                             exit_data = {
                                 'exit_time': current_time,
-                                'positions': trade_positions,
+                                'positions': self._positions_to_dict(trade_positions),
                                 'exit_reason': 'Limit Order Fill',
                                 'entry_cost': entry_cost,
                                 'entry_commission': entry_commission,
@@ -1762,7 +1762,16 @@ class TradingEngine:
         if self.active_trades:
             for i, (positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
                 import datetime as dt
-                hold_time = (dt.datetime.now() - entry_time).total_seconds() / 60
+                # Handle timezone-aware datetime subtraction
+                current_time = dt.datetime.now()
+                if entry_time.tzinfo is not None and current_time.tzinfo is None:
+                    # If entry_time is timezone-aware but current_time is not, make current_time timezone-aware
+                    current_time = current_time.replace(tzinfo=entry_time.tzinfo)
+                elif entry_time.tzinfo is None and current_time.tzinfo is not None:
+                    # If current_time is timezone-aware but entry_time is not, make entry_time timezone-aware
+                    entry_time = entry_time.replace(tzinfo=current_time.tzinfo)
+                
+                hold_time = (current_time - entry_time).total_seconds() / 60
                 self.log(f"   Trade {i+1}: {len(positions)} positions, held for {hold_time:.1f} minutes")
         
         # Log files
@@ -1976,7 +1985,7 @@ class TradingEngine:
                     estimated_loss = total_entry_cost - exit_value
                     stop_data = {
                         'trigger_time': current_time,
-                        'positions': positions,
+                        'positions': self._positions_to_dict(positions),
                         'loss_percent': loss_percentage,
                         'entry_cost': total_entry_cost,
                         'exit_value': exit_value,
@@ -2091,6 +2100,30 @@ class TradingEngine:
         }
         
         self.telegram_notifier.send_system_status_alert(status_data)
+    
+    def _positions_to_dict(self, positions):
+        """Convert Position objects to dictionaries for Telegram alerts"""
+        if not positions:
+            return []
+        
+        position_dicts = []
+        for pos in positions:
+            pos_dict = {
+                'type': pos.type,
+                'symbol': pos.symbol,
+                'strike': pos.strike,
+                'entry_price': pos.entry_price,
+                'contracts': pos.contracts,
+                'target': pos.target,
+                'expiration': pos.expiration_date,
+                'entry_time': pos.entry_time,
+                'trade_id': getattr(pos, 'trade_id', None),
+                'entry_order_id': getattr(pos, 'entry_order_id', None),
+                'limit_order_id': getattr(pos, 'limit_order_id', None),
+                'limit_price': getattr(pos, 'limit_price', None)
+            }
+            position_dicts.append(pos_dict)
+        return position_dicts
     
     def _send_signal_alert(self, signal_data):
         """Send signal detection alert to Telegram"""
