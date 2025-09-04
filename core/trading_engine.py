@@ -830,12 +830,18 @@ class TradingEngine:
         if (isinstance(result['action'], str) and (
                 result['action'].lower().find('entry') != -1 or
                 result['action'] in entry_actions)):
-            self.trade_id_counter += 1
-            trade_id = self.trade_id_counter
-            # Assign trade_id to all positions in this entry
-            if result.get('positions'):
-                for pos in result['positions']:
-                    setattr(pos, 'trade_id', trade_id)
+            # Get trade_id from positions (already assigned during position creation)
+            trade_id = None
+            if result.get('positions') and result['positions']:
+                trade_id = getattr(result['positions'][0], 'trade_id', None)
+            
+            # Fallback: create new trade_id if positions don't have one
+            if trade_id is None:
+                self.trade_id_counter += 1
+                trade_id = self.trade_id_counter
+                if result.get('positions'):
+                    for pos in result['positions']:
+                        setattr(pos, 'trade_id', trade_id)
             log_entry = {
                 'trade_id': trade_id,
                 'timestamp': result['timestamp'],
@@ -1125,6 +1131,13 @@ class TradingEngine:
                     strike = row['strike']
                     entry_price = row['ask']
                     contracts = int(self.risk_per_side // (entry_price * 100))
+                    # Generate unique trade ID for this trade
+                    if len(positions) == 0:  # Only increment for the first position of a new trade
+                        self.trade_id_counter += 1
+                        current_trade_id = self.trade_id_counter
+                    else:
+                        current_trade_id = self.trade_id_counter  # Use same ID for both positions
+                        
                     positions.append(Position(
                         type=option_type,
                         strike=strike,
@@ -1132,7 +1145,8 @@ class TradingEngine:
                         contracts=contracts,
                         target=entry_price * self.profit_target,
                         expiration_date=expiration,
-                        entry_time=datetime.datetime.now()
+                        entry_time=datetime.datetime.now(),
+                        trade_id=current_trade_id
                     ))
                 if len(positions) == 2:
                     self.log(f"✅ Valid options found for both sides (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
@@ -1274,6 +1288,10 @@ class TradingEngine:
                 if put_candidates:
                     best_put = min(put_candidates, key=lambda p: abs(p['strike'] - price))
                 final_positions = []
+                # Generate unique trade ID for this backtest trade
+                self.trade_id_counter += 1
+                current_trade_id = self.trade_id_counter
+                
                 if best_call:
                     from core.trading_engine import Position
                     final_positions.append(Position(
@@ -1284,7 +1302,8 @@ class TradingEngine:
                         target=best_call['ask'],  # or your logic for target
                         symbol='SPY',
                         expiration_date=best_call['expiration_date'],
-                        entry_time=None
+                        entry_time=None,
+                        trade_id=current_trade_id
                     ))
                 if best_put:
                     from core.trading_engine import Position
@@ -1296,7 +1315,8 @@ class TradingEngine:
                         target=best_put['ask'],  # or your logic for target
                         symbol='SPY',
                         expiration_date=best_put['expiration_date'],
-                        entry_time=None
+                        entry_time=None,
+                        trade_id=current_trade_id
                     ))
                 if len(final_positions) == 2:
                     return final_positions
