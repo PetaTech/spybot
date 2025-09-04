@@ -622,15 +622,25 @@ class TradingEngine:
                         self.log(f"✅ Trade #{trade_index + 1} EXIT COMPLETE. P&L: ${trade_pnl:.2f} (Entry: ${entry_cost:.2f} + ${entry_commission:.2f}, Exit: ${exit_value:.2f} - ${exit_commission:.2f})")
                         
                         # Send Telegram trade exit alert
+                        trade_id = getattr(trade_positions[0], 'trade_id', trade_index + 1) if trade_positions else trade_index + 1
+                        holding_time_minutes = (market_row.current_time - entry_time).total_seconds() / 60
+                        holding_time = f"{holding_time_minutes:.1f} minutes"
+                        
                         exit_data = {
+                            'trade_id': trade_id,
                             'exit_time': market_row.current_time,
+                            'holding_time': holding_time,
                             'positions': self._positions_to_dict(trade_positions),
                             'exit_reason': 'Manual Exit',
                             'entry_cost': entry_cost,
                             'entry_commission': entry_commission,
-                            'total_exit_value': exit_value,
+                            'total_entry_cost': entry_cost + entry_commission,
+                            'exit_value': exit_value,
                             'exit_commission': exit_commission,
-                            'trade_pnl': trade_pnl,
+                            'pnl': trade_pnl,
+                            'daily_pnl': self.daily_pnl,
+                            'daily_trades': self.daily_trades,
+                            'total_trades': self.total_trades,
                             'timing_status': self.get_market_timing_status(market_row.current_time)
                         }
                         self._send_exit_alert(exit_data)
@@ -719,14 +729,21 @@ class TradingEngine:
                                 self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
                                 
                                 # Send Telegram entry alert
+                                trade_id = getattr(positions[0], 'trade_id', len(self.active_trades)) if positions else len(self.active_trades)
                                 entry_data = {
+                                    'trade_id': trade_id,
                                     'entry_time': market_row.current_time,
                                     'positions': self._positions_to_dict(positions),
                                     'market_price': market_row.close,
+                                    'total_risk': self.risk_per_side * 2,
+                                    'risk_per_side': self.risk_per_side,
                                     'entry_cost': entry_cost,
-                                    'entry_commission': entry_commission,
+                                    'commission': entry_commission,
                                     'total_entry_cost': total_entry_cost,
-                                    'daily_trades': len(self.active_trades),
+                                    'expiration_date': expiration,
+                                    'trades_active': len(self.active_trades),
+                                    'symbol': 'SPY',
+                                    'limit_orders_info': 'Limit orders placed for profit targets',
                                     'timing_status': self.get_market_timing_status(market_row.current_time)
                                 }
                                 self._send_entry_alert(entry_data)
@@ -1424,11 +1441,19 @@ class TradingEngine:
                         self.log(f"🎯 Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
                         
                         # Send Telegram limit order fill alert
+                        fill_price = status.get('avg_fill_price', filled_position.limit_price)
+                        profit_percent = ((fill_price - filled_position.entry_price) / filled_position.entry_price) * 100 if filled_position.entry_price > 0 else 0
+                        trade_id = getattr(filled_position, 'trade_id', 'N/A')
+                        
                         limit_fill_data = {
                             'fill_time': current_time,
+                            'option_type': filled_position.type,
+                            'strike': filled_position.strike,
+                            'fill_price': fill_price,
+                            'profit_percent': profit_percent,
+                            'trade_id': trade_id,
                             'filled_position': filled_position,
                             'order_status': status,
-                            'fill_price': status.get('avg_fill_price', filled_position.limit_price),
                             'filled_quantity': status.get('filled_quantity', 0),
                             'timing_status': self.get_market_timing_status(current_time)
                         }
@@ -1479,15 +1504,26 @@ class TradingEngine:
                             self.log(f"✅ LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
                             
                             # Send Telegram trade exit alert
+                            trade_id = getattr(filled_position, 'trade_id', trade_index + 1) if hasattr(filled_position, 'trade_id') else trade_index + 1
+                            entry_time = self.trade_entry_times[trade_index] if trade_index is not None and trade_index < len(self.trade_entry_times) else current_time
+                            holding_time_minutes = (current_time - entry_time).total_seconds() / 60
+                            holding_time = f"{holding_time_minutes:.1f} minutes"
+                            
                             exit_data = {
+                                'trade_id': trade_id,
                                 'exit_time': current_time,
+                                'holding_time': holding_time,
                                 'positions': self._positions_to_dict(trade_positions),
                                 'exit_reason': 'Limit Order Fill',
                                 'entry_cost': entry_cost,
                                 'entry_commission': entry_commission,
-                                'total_exit_value': total_exit_value,
+                                'total_entry_cost': entry_cost + entry_commission,
+                                'exit_value': total_exit_value,
                                 'exit_commission': exit_commission,
-                                'trade_pnl': trade_pnl,
+                                'pnl': trade_pnl,
+                                'daily_pnl': self.daily_pnl,
+                                'daily_trades': self.daily_trades,
+                                'total_trades': self.total_trades,
                                 'filled_position': filled_position,
                                 'fill_price': status.get('avg_fill_price', filled_position.limit_price),
                                 'timing_status': self.get_market_timing_status(current_time)
@@ -1983,8 +2019,11 @@ class TradingEngine:
                     
                     # Send Telegram stop loss alert
                     estimated_loss = total_entry_cost - exit_value
+                    trade_id = getattr(positions[0], 'trade_id', 'N/A') if positions else 'N/A'
+                    
                     stop_data = {
                         'trigger_time': current_time,
+                        'trade_id': trade_id,
                         'positions': self._positions_to_dict(positions),
                         'loss_percent': loss_percentage,
                         'entry_cost': total_entry_cost,
@@ -2013,6 +2052,10 @@ class TradingEngine:
             # Send Telegram emergency stop loss alert
             emergency_stop_data = {
                 'trigger_time': current_time,
+                'trade_id': 'EMERGENCY',
+                'loss_percent': ((-self.daily_pnl / self.emergency_stop_loss) * 100) if self.emergency_stop_loss > 0 else 100,
+                'estimated_loss': -self.daily_pnl,
+                'stop_loss_limit': self.emergency_stop_loss,
                 'daily_pnl': self.daily_pnl,
                 'emergency_stop_limit': self.emergency_stop_loss,
                 'active_trades': len(self.active_trades),
