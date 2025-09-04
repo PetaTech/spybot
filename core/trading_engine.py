@@ -1974,7 +1974,12 @@ class TradingEngine:
         # Get actual market status
         current_time = datetime.datetime.now(tz=tz.gettz(self.timezone))
         timing_status = self.get_market_timing_status(current_time)
-        market_status = "OPEN" if timing_status['market_open'] else "CLOSED"
+        
+        # Market is open if we're past open time and before close time
+        time_since_open = timing_status['time_since_open_minutes']
+        time_until_close = timing_status['time_until_close_minutes']
+        market_is_open = (time_since_open >= 0 and time_until_close > 0)
+        market_status = "OPEN" if market_is_open else "CLOSED"
         
         # Format timestamp in correct timezone  
         ny_time = current_time.astimezone(tz.gettz(self.timezone))
