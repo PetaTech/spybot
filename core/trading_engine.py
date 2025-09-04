@@ -626,9 +626,9 @@ class TradingEngine:
                         holding_time_minutes = (market_row.current_time - entry_time).total_seconds() / 60
                         holding_time = f"{holding_time_minutes:.1f} minutes"
                         
-                        # Calculate win rate
+                        # Calculate win rate (handle None PnL values)
                         total_completed_trades = self.total_trades
-                        wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl', 0) > 0)
+                        wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl') is not None and entry.get('pnl', 0) > 0)
                         win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
                         
                         exit_data = {
@@ -1536,9 +1536,9 @@ class TradingEngine:
                             holding_time_minutes = (current_time - entry_time).total_seconds() / 60
                             holding_time = f"{holding_time_minutes:.1f} minutes"
                             
-                            # Calculate win rate
+                            # Calculate win rate (handle None PnL values)
                             total_completed_trades = self.total_trades
-                            wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl', 0) > 0)
+                            wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl') is not None and entry.get('pnl', 0) > 0)
                             win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
                             
                             exit_data = {
