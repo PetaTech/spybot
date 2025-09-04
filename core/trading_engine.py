@@ -1782,6 +1782,9 @@ class TradingEngine:
             self.active_limit_orders.clear()
             self.log(f"🧹 CLEANUP COMPLETE: All limit orders processed")
         
+        # Send system stop alert to Telegram
+        self._send_system_stop_alert()
+        
         self.log_final_results()
 
     def get_market_timing_status(self, current_time: datetime.datetime) -> Dict:
@@ -1967,12 +1970,20 @@ class TradingEngine:
         """Send system start alert to Telegram"""
         if not self.telegram_notifier:
             return
+        
+        # Get actual market status
+        current_time = datetime.datetime.now(tz=tz.gettz(self.timezone))
+        timing_status = self.get_market_timing_status(current_time)
+        market_status = "OPEN" if timing_status['market_open'] else "CLOSED"
+        
+        # Format timestamp in correct timezone  
+        ny_time = current_time.astimezone(tz.gettz(self.timezone))
             
         status_data = {
             'status': 'started',
-            'timestamp': datetime.datetime.now(),
+            'timestamp': ny_time,
             'mode': self.mode,
-            'market_status': 'OPEN',  # Could be enhanced with actual market status
+            'market_status': market_status,
             'vix_regime': getattr(self, '_vix_regime', 'Unknown'),
             'risk_per_side': self.risk_per_side,
             'total_risk': self.risk_per_side * 2
@@ -2019,10 +2030,14 @@ class TradingEngine:
         """Send system stop alert to Telegram"""
         if not (self.telegram_notifier and self.telegram_settings.get('system_alerts', False)):
             return
+        
+        # Format timestamp in correct timezone
+        current_time = datetime.datetime.now(tz=tz.gettz(self.timezone))
+        ny_time = current_time.astimezone(tz.gettz(self.timezone))
             
         status_data = {
             'status': 'stopped',
-            'timestamp': datetime.datetime.now(),
+            'timestamp': ny_time,
             'mode': self.mode,
             'market_status': 'CLOSED',
             'final_pnl': getattr(self, 'total_pnl', 0),
