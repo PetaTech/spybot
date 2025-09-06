@@ -5,7 +5,7 @@ Core strategy parameters shared across all trading modes
 
 # === Core Strategy Parameters ===
 REFERENCE_PRICE_TYPE = 'window_high_low'  # 'open', 'prev_close', 'vwap', 'window_high_low'
-COOLDOWN_PERIOD = 20 * 60  # 20 minutes between trades
+COOLDOWN_PERIOD = 30 * 60  # 20 minutes between trades
 RISK_PER_SIDE = 400  # $ risk per side
 MAX_RETRIES = 6  # Maximum retries for option chain fetching
 RETRY_DELAY = 5  # Seconds between retries
