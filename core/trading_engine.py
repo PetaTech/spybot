@@ -1340,28 +1340,74 @@ class TradingEngine:
                 time.sleep(self.retry_delay)
         return []
     
+    def _retry_order_placement(self, order_func, order_type_desc: str, **kwargs) -> str:
+        """Helper method to retry order placement with exponential backoff"""
+        import time
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                self.log(f"[Attempt {attempt}/{self.max_retries}] Placing {order_type_desc} order...")
+                order_id = order_func(**kwargs)
+                
+                if order_id != "FAILED" and order_id != "N/A":
+                    self.log(f"✅ {order_type_desc} order placed successfully: {order_id}")
+                    return order_id
+                else:
+                    self.log(f"❌ {order_type_desc} order failed on attempt {attempt}")
+                    
+            except Exception as e:
+                self.log(f"❌ {order_type_desc} order exception on attempt {attempt}: {str(e)}")
+            
+            # Wait before retrying (exponential backoff)
+            if attempt < self.max_retries:
+                wait_time = min(self.retry_delay * (2 ** (attempt - 1)), 30)  # Cap at 30 seconds
+                self.log(f"⏳ Waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+        
+        self.log(f"💥 {order_type_desc} order failed after {self.max_retries} attempts")
+        return "FAILED"
+
     def execute_entry(self, positions: List[Position], expiration: str) -> bool:
-        """Execute entry orders and immediately place limit sell orders"""
+        """Execute entry orders and immediately place limit sell orders with retry logic"""
         if not self.order_executor:
             return False
         try:
+            failed_entries = []
+            
             for pos in positions:
-                # Place entry order (market buy)
-                entry_order_id = self.order_executor.place_order(
-                    pos.type, pos.strike, pos.contracts,
-                    action="BUY", expiration_date=expiration
+                # Place entry order (market buy) with retry logic
+                entry_order_id = self._retry_order_placement(
+                    self.order_executor.place_order,
+                    f"ENTRY {pos.type} Strike={pos.strike}",
+                    option_type=pos.type, 
+                    strike=pos.strike, 
+                    contracts=pos.contracts,
+                    action="BUY", 
+                    expiration_date=expiration
                 )
                 pos.entry_order_id = entry_order_id
+                
+                # If entry order failed completely, track it
+                if entry_order_id == "FAILED":
+                    failed_entries.append(pos)
+                    self.log(f"⚠️ ENTRY FAILED: {pos.type} Strike={pos.strike} - skipping limit order")
+                    continue
                 
                 # Calculate limit sell price using VIX-based profit target
                 profit_multiplier = getattr(self, 'profit_target', 1.35)  # Default to 1.35 if not set
                 limit_price = round(pos.entry_price * profit_multiplier, 2)
                 pos.limit_price = limit_price
                 
-                # Place limit sell order immediately
-                limit_order_id = self.order_executor.place_limit_order(
-                    pos.type, pos.strike, pos.contracts,
-                    action="SELL", expiration_date=expiration, limit_price=limit_price
+                # Place limit sell order immediately with retry logic
+                limit_order_id = self._retry_order_placement(
+                    self.order_executor.place_limit_order,
+                    f"LIMIT {pos.type} Strike={pos.strike}",
+                    option_type=pos.type,
+                    strike=pos.strike,
+                    contracts=pos.contracts,
+                    action="SELL",
+                    expiration_date=expiration,
+                    limit_price=limit_price
                 )
                 pos.limit_order_id = limit_order_id
                 
@@ -1382,29 +1428,80 @@ class TradingEngine:
                 else:
                     self.log(f"❌ LIMIT SELL ORDER FAILED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} - will use manual exits only")
             
-            self.total_trades += 1  # Increment total trades on entry
-            return True
+            # Check if we have any successful entries
+            successful_entries = [pos for pos in positions if pos.entry_order_id != "FAILED"]
+            
+            if len(failed_entries) > 0:
+                self.log(f"⚠️ {len(failed_entries)} out of {len(positions)} entry orders failed")
+                
+                # If more than half the entries failed, abort the trade
+                if len(failed_entries) >= len(positions) / 2:
+                    self.log(f"💥 TRADE ABORTED: Too many failed entries ({len(failed_entries)}/{len(positions)})")
+                    # Cancel any successful limit orders from this trade
+                    for pos in successful_entries:
+                        if pos.limit_order_id != "FAILED":
+                            try:
+                                self.order_executor.cancel_order(pos.limit_order_id)
+                                self.log(f"🧹 CANCELLED LIMIT ORDER: {pos.limit_order_id} due to trade abort")
+                            except Exception as e:
+                                self.log(f"❌ Failed to cancel limit order {pos.limit_order_id}: {e}")
+                    return False
+            
+            # If we have at least some successful entries, proceed
+            if successful_entries:
+                self.total_trades += 1  # Increment total trades on entry
+                self.log(f"✅ TRADE ENTRY COMPLETED: {len(successful_entries)}/{len(positions)} positions filled")
+                return True
+            else:
+                self.log(f"💥 TRADE FAILED: No successful entries")
+                return False
         except Exception as e:
             self.log(f"[ERROR] Entry execution failed: {str(e)}")
             return False
     
     def execute_exit(self, positions: List[Position], expiration: str) -> bool:
-        """Execute exit orders and cancel any pending limit orders"""
+        """Execute exit orders and cancel any pending limit orders with retry logic"""
         if not self.order_executor:
             return False
         try:
             # First, cancel all limit orders for this trade
             self.cancel_trade_limit_orders(positions)
             
-            # Then place market sell orders
+            # Then place market sell orders with retry logic
+            failed_exits = []
+            successful_exits = []
+            
             for pos in positions:
-                order_id = self.order_executor.place_order(
-                    pos.type, pos.strike, pos.contracts,
-                    action="SELL", expiration_date=pos.expiration_date
+                order_id = self._retry_order_placement(
+                    self.order_executor.place_order,
+                    f"EXIT {pos.type} Strike={pos.strike}",
+                    option_type=pos.type,
+                    strike=pos.strike,
+                    contracts=pos.contracts,
+                    action="SELL",
+                    expiration_date=pos.expiration_date
                 )
-                self.log(f"EXIT {pos.type} Strike={pos.strike} Qty={pos.contracts} OrderID={order_id}")
-            self.total_trades += 1  # Increment total trades on exit
-            return True
+                
+                if order_id == "FAILED":
+                    failed_exits.append(pos)
+                    self.log(f"💥 EXIT FAILED: {pos.type} Strike={pos.strike} after {self.max_retries} attempts")
+                else:
+                    successful_exits.append(pos)
+                    self.log(f"EXIT {pos.type} Strike={pos.strike} Qty={pos.contracts} OrderID={order_id}")
+            
+            # Report results
+            if failed_exits:
+                self.log(f"⚠️ {len(failed_exits)} out of {len(positions)} exit orders failed")
+                self.log(f"⚠️ PARTIAL EXIT: {len(successful_exits)} positions sold, {len(failed_exits)} positions still open")
+            
+            # Consider exit successful if at least some orders went through
+            if successful_exits:
+                self.total_trades += 1  # Increment total trades on exit
+                return True
+            else:
+                self.log(f"💥 EXIT COMPLETELY FAILED: No positions could be sold")
+                return False
+                
         except Exception as e:
             self.log(f"[ERROR] Exit execution failed: {str(e)}")
             return False
@@ -1498,19 +1595,25 @@ class TradingEngine:
                             # Cancel all other limit orders for this trade
                             self.cancel_trade_limit_orders(trade_positions, exclude_order_id=order_id)
                             
-                            # Market sell the remaining position(s)
+                            # Market sell the remaining position(s) with retry logic
                             remaining_positions = [pos for pos in trade_positions if pos.limit_order_id != order_id]
                             if remaining_positions:
                                 self.log(f"📈 MARKET SELLING REMAINING POSITIONS: {len(remaining_positions)} positions")
                                 for remaining_pos in remaining_positions:
-                                    try:
-                                        market_order_id = self.order_executor.place_order(
-                                            remaining_pos.type, remaining_pos.strike, remaining_pos.contracts,
-                                            action="SELL", expiration_date=expiration
-                                        )
+                                    market_order_id = self._retry_order_placement(
+                                        self.order_executor.place_order,
+                                        f"MARKET SELL {remaining_pos.type} Strike={remaining_pos.strike}",
+                                        option_type=remaining_pos.type,
+                                        strike=remaining_pos.strike,
+                                        contracts=remaining_pos.contracts,
+                                        action="SELL",
+                                        expiration_date=expiration
+                                    )
+                                    
+                                    if market_order_id != "FAILED":
                                         self.log(f"📈 MARKET SELL: {remaining_pos.type} Strike={remaining_pos.strike} OrderID={market_order_id}")
-                                    except Exception as e:
-                                        self.log(f"❌ Failed to market sell remaining position: {e}")
+                                    else:
+                                        self.log(f"💥 MARKET SELL FAILED: {remaining_pos.type} Strike={remaining_pos.strike} after {self.max_retries} attempts")
                             
                             # Calculate P&L for the filled trade
                             entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)

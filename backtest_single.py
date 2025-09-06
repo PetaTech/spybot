@@ -6,6 +6,7 @@ Streams historical data rows to the trading engine
 import pandas as pd
 import datetime
 import os
+import sys
 from pathlib import Path
 from dateutil import tz
 from typing import Optional, Iterator, Dict
@@ -251,9 +252,130 @@ def run_backtest(config: dict = None, spy_file: str = None, options_file: str = 
             }
 
 
+def parse_data_directory(directory_name: str) -> dict:
+    """
+    Parse data directory name to extract file paths
+    
+    Args:
+        directory_name: Directory name in format {start_date}_{end_date}_{interval}
+                       e.g., "2025-09-03_2025-09-04_15min"
+    
+    Returns:
+        Dictionary with SPY and options file paths
+    """
+    # Validate directory name format
+    parts = directory_name.split('_')
+    if len(parts) != 3:
+        raise ValueError(f"Invalid directory format. Expected: {{start_date}}_{{end_date}}_{{interval}}, got: {directory_name}")
+    
+    start_date, end_date, interval = parts
+    
+    # Validate date formats
+    try:
+        datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError as e:
+        raise ValueError(f"Invalid date format in directory name: {e}")
+    
+    # Validate interval format (should end with 'min')
+    if not interval.endswith('min'):
+        raise ValueError(f"Invalid interval format. Expected format like '15min', got: {interval}")
+    
+    # Construct full paths
+    base_dir = os.path.join("./data", directory_name)
+    
+    spy_filename = f"spy_data_{start_date}_{end_date}_{interval}.parquet"
+    options_filename = f"spy_options_0dte_contracts_{start_date}_{end_date}_{interval}.parquet"
+    
+    spy_path = os.path.join(base_dir, spy_filename)
+    options_path = os.path.join(base_dir, options_filename)
+    
+    return {
+        'spy_path': spy_path,
+        'options_path': options_path,
+        'directory': base_dir,
+        'start_date': start_date,
+        'end_date': end_date,
+        'interval': interval
+    }
+
+
+def validate_data_files(file_paths: dict) -> None:
+    """
+    Validate that the data files exist
+    
+    Args:
+        file_paths: Dictionary containing file paths from parse_data_directory()
+    """
+    spy_path = file_paths['spy_path']
+    options_path = file_paths['options_path']
+    
+    if not os.path.exists(spy_path):
+        raise FileNotFoundError(f"SPY data file not found: {spy_path}")
+    
+    if not os.path.exists(options_path):
+        raise FileNotFoundError(f"Options data file not found: {options_path}")
+    
+    print(f"✅ Found SPY data file: {spy_path}")
+    print(f"✅ Found Options data file: {options_path}")
+
+
 def main():
-    """Main backtest function - just provides data and config to engine"""
-    run_backtest()
+    """Enhanced main backtest function with command line argument support"""
+    
+    # Check command line arguments
+    if len(sys.argv) == 1:
+        # No arguments provided - use config defaults
+        print("⚠️  No data directory specified. Using config defaults...")
+        print("💡 Usage: python backtest_single.py <data_directory>")
+        print("💡 Example: python backtest_single.py 2025-09-03_2025-09-04_15min")
+        print("📁 Using config files for SPY and options paths")
+        run_backtest()
+        return
+    
+    if len(sys.argv) != 2:
+        print("❌ Error: Invalid number of arguments")
+        print("Usage: python backtest_single.py <data_directory>")
+        print("Example: python backtest_single.py 2025-09-03_2025-09-04_15min")
+        print("")
+        print("Directory format: {start_date}_{end_date}_{interval}")
+        print("  - start_date: YYYY-MM-DD")
+        print("  - end_date: YYYY-MM-DD") 
+        print("  - interval: 1min, 5min, 15min, etc.")
+        sys.exit(1)
+    
+    # Parse command line argument
+    directory_name = sys.argv[1]
+    
+    try:
+        # Parse and validate directory name
+        print(f"📁 Parsing data directory: {directory_name}")
+        file_paths = parse_data_directory(directory_name)
+        
+        print(f"📅 Date range: {file_paths['start_date']} to {file_paths['end_date']}")
+        print(f"⏱️  Interval: {file_paths['interval']}")
+        print(f"🎯 Data directory: {file_paths['directory']}")
+        
+        # Validate that files exist
+        validate_data_files(file_paths)
+        
+        # Run backtest with the specified files
+        print(f"🚀 Starting backtest with data from {directory_name}")
+        run_backtest(
+            spy_file=file_paths['spy_path'],
+            options_file=file_paths['options_path']
+        )
+        
+    except ValueError as e:
+        print(f"❌ Directory format error: {e}")
+        sys.exit(1)
+    except FileNotFoundError as e:
+        print(f"❌ File not found: {e}")
+        print("💡 Make sure you have downloaded the data using download_polygon.py first")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

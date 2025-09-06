@@ -215,14 +215,14 @@ class SPYDataPipeline:
     def save_to_parquet(self, spy_df: pd.DataFrame, options_df: pd.DataFrame, 
                        start_date: str, end_date: str, output_dir: str) -> Tuple[str, str]:
         """
-        Save SPY and options data to Parquet files.
+        Save SPY and options data to Parquet files organized in date-range directories.
         
         Args:
             spy_df: Combined SPY DataFrame
             options_df: Combined SPY options DataFrame
-            start_date: Start date for filename
-            end_date: End date for filename
-            output_dir: Directory to save files
+            start_date: Start date for directory and filename
+            end_date: End date for directory and filename
+            output_dir: Base directory to save files
             
         Returns:
             Tuple of (spy_parquet_path, options_parquet_path)
@@ -231,19 +231,25 @@ class SPYDataPipeline:
         options_parquet_path = None
         
         try:
-            # Create output directory if it doesn't exist
-            os.makedirs(output_dir, exist_ok=True)
+            # Create date-range directory: {start_date}_{end_date}_{interval}
+            date_range_dir = f"{start_date}_{end_date}_{self.data_interval}min"
+            full_output_dir = os.path.join(output_dir, date_range_dir)
+            os.makedirs(full_output_dir, exist_ok=True)
+            
+            logger.info(f"📁 Created directory: {full_output_dir}")
             
             # Save SPY data
             if not spy_df.empty:
-                spy_parquet_path = os.path.join(output_dir, f"spy_data_{start_date}_{end_date}_{self.data_interval}min.parquet")
+                spy_filename = f"spy_data_{start_date}_{end_date}_{self.data_interval}min.parquet"
+                spy_parquet_path = os.path.join(full_output_dir, spy_filename)
                 spy_df.to_parquet(spy_parquet_path, compression='snappy', index=False)
                 logger.info(f"✅ Saved {len(spy_df)} SPY records to {spy_parquet_path}")
                 logger.info(f"📊 SPY file size: {os.path.getsize(spy_parquet_path) / (1024*1024):.2f} MB")
             
             # Save SPY options data (0DTE contracts)
             if not options_df.empty:
-                options_parquet_path = os.path.join(output_dir, f"spy_options_0dte_contracts_{start_date}_{end_date}_{self.data_interval}min.parquet")
+                options_filename = f"spy_options_0dte_contracts_{start_date}_{end_date}_{self.data_interval}min.parquet"
+                options_parquet_path = os.path.join(full_output_dir, options_filename)
                 options_df.to_parquet(options_parquet_path, compression='snappy', index=False)
                 logger.info(f"✅ Saved {len(options_df)} SPY options contracts (0DTE) records to {options_parquet_path}")
                 logger.info(f"📊 Options file size: {os.path.getsize(options_parquet_path) / (1024*1024):.2f} MB")
@@ -308,7 +314,11 @@ class SPYDataPipeline:
             combined_spy_df, combined_options_df, start_date, end_date, output_dir
         )
         
-        logger.info(f"🎉 Pipeline completed! Files saved to: {output_dir}")
+        # Create the date range directory path for logging
+        date_range_dir = f"{start_date}_{end_date}_{self.data_interval}min"
+        full_output_path = os.path.join(output_dir, date_range_dir)
+        
+        logger.info(f"🎉 Pipeline completed! Files saved to: {full_output_path}")
         logger.info(f"📊 Total SPY records: {len(combined_spy_df)}")
         logger.info(f"📊 Total SPY options contracts (0DTE) records: {len(combined_options_df)}")
         
@@ -407,9 +417,16 @@ def main():
     try:
         spy_parquet_path, options_parquet_path = pipeline.run_pipeline(start_date, end_date, OUTPUT_DIR)
         
-        print(f"\n✅ Success! Parquet files created:")
-        print(f"📁 SPY data: {spy_parquet_path}")
-        print(f"📁 Options contracts data (0DTE): {options_parquet_path}")
+        # Show the organized directory structure
+        date_range_dir = f"{start_date}_{end_date}_{data_interval}min"
+        output_directory = os.path.join(OUTPUT_DIR, date_range_dir)
+        
+        print(f"\n✅ Success! Files organized in date-range directory:")
+        print(f"📁 Directory: {output_directory}/")
+        if spy_parquet_path:
+            print(f"   📊 SPY data: {os.path.basename(spy_parquet_path)}")
+        if options_parquet_path:
+            print(f"   📊 Options contracts (0DTE): {os.path.basename(options_parquet_path)}")
         
     except Exception as e:
         logger.error(f"💥 Pipeline failed: {e}")

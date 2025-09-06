@@ -5,7 +5,7 @@ Settings for Telegram notifications
 
 # === Telegram Bot Configuration ===
 TELEGRAM_BOT_TOKEN = "8352695755:AAFblmWmOYRUnWC36yjPxGVu9vKU7fljg7k"  # Get from @BotFather on Telegram
-TELEGRAM_CHAT_ID = "6529748739"     # Your chat ID or group chat ID
+TELEGRAM_CHAT_ID = "-1002860850553"     # Your chat ID or group chat ID
 TELEGRAM_ENABLED = True                     # Set to False to disable notifications
 
 # === Notification Settings ===
