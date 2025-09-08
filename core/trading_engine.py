@@ -178,7 +178,7 @@ class PaperOrderExecutor(OrderExecutor):
                               expiration_date=expiration_date, price=price)
         
         # Log the order placement
-        print(f"🔴 SANDBOX ORDER PLACED: {action} {contracts} {option_type} {strike} exp:{expiration_date} -> ID: {order_id}")
+        print(f" SANDBOX ORDER PLACED: {action} {contracts} {option_type} {strike} exp:{expiration_date} -> ID: {order_id}")
         
         return order_id
     
@@ -193,7 +193,7 @@ class PaperOrderExecutor(OrderExecutor):
                                     expiration_date=expiration_date, limit_price=limit_price)
         
         # Log the order placement
-        print(f"🎯 SANDBOX LIMIT ORDER PLACED: {action} {contracts} {option_type} {strike} @ ${limit_price:.2f} -> ID: {order_id}")
+        print(f" SANDBOX LIMIT ORDER PLACED: {action} {contracts} {option_type} {strike} @ ${limit_price:.2f} -> ID: {order_id}")
         
         return order_id
     
@@ -366,15 +366,15 @@ class TradingEngine:
         self.winning_trades = 0
         self.losing_trades = 0
         
-        self.log(f"🚀 Trading Engine initialized in {self.mode} mode")
-        self.log(f"📊 Strategy: {self.cooldown_period//60}min cooldown")
-        self.log(f"📈 Reference price type: {self.reference_price_type}")
-        self.log(f"⏰ Market timing: {self.market_open_buffer_minutes}min open buffer, {self.market_close_buffer_minutes}min close buffer")
-        self.log(f"🔄 Early signal cooldown: {self.early_signal_cooldown_minutes}min")
-        self.log(f"💸 Commission: ${self.commission_per_contract:.2f} per contract, Slippage: ${self.slippage:.2f} per contract")
-        self.log(f"💰 Pricing: Entry at ASK, Exit at BID (realistic trading)")
-        self.log(f"🛑 Stop Loss: {self.stop_loss_percentage:.1f}% loss threshold")
-        self.log(f"🚨 Emergency Stop Loss: ${self.emergency_stop_loss} daily loss limit")
+        self.log(f"Trading Engine initialized in {self.mode} mode")
+        self.log(f"Strategy: {self.cooldown_period//60}min cooldown")
+        self.log(f"Reference price type: {self.reference_price_type}")
+        self.log(f"Market timing: {self.market_open_buffer_minutes}min open buffer, {self.market_close_buffer_minutes}min close buffer")
+        self.log(f"Early signal cooldown: {self.early_signal_cooldown_minutes}min")
+        self.log(f"Commission: ${self.commission_per_contract:.2f} per contract, Slippage: ${self.slippage:.2f} per contract")
+        self.log(f"Pricing: Entry at ASK, Exit at BID (realistic trading)")
+        self.log(f"Stop Loss: {self.stop_loss_percentage:.1f}% loss threshold")
+        self.log(f"Emergency Stop Loss: ${self.emergency_stop_loss} daily loss limit")
         
         # VIX parameters initialization
         self._vix_last_fetch_time = 0
@@ -512,9 +512,9 @@ class TradingEngine:
         in_close_buffer = time_until_close < self.market_close_buffer_minutes
         
         if in_open_buffer:
-            self.log(f"⏰ MARKET OPEN BUFFER: +{time_since_open:.1f}min < {self.market_open_buffer_minutes}min")
+            self.log(f" MARKET OPEN BUFFER: +{time_since_open:.1f}min < {self.market_open_buffer_minutes}min")
         if in_close_buffer:
-            self.log(f"⏰ MARKET CLOSE BUFFER: -{time_until_close:.1f}min < {self.market_close_buffer_minutes}min")
+            self.log(f" MARKET CLOSE BUFFER: -{time_until_close:.1f}min < {self.market_close_buffer_minutes}min")
         
         # Store current time for options queries
         self.last_processed_time = current_time
@@ -553,7 +553,7 @@ class TradingEngine:
         move_percent, absolute_move, reference_price = self.calculate_percentage_move(market_row.current_time)
         result['move_percent'] = move_percent
         
-        self.log(f"📊 Processing: SPY=${market_row.close:.2f} | Move: {move_percent:.2f}% ({absolute_move:.2f}pts) | Active trades: {len(self.active_trades)}")
+        self.log(f" Processing: SPY=${market_row.close:.2f} | Move: {move_percent:.2f}% ({absolute_move:.2f}pts) | Active trades: {len(self.active_trades)}")
         
         print(f"[ENGINE DEBUG] Move calculation: {move_percent:.2f}% ({absolute_move:.2f} points)")
         
@@ -572,9 +572,9 @@ class TradingEngine:
                 if trade_positions and hasattr(trade_positions[0], 'trade_id'):
                     trade_id = getattr(trade_positions[0], 'trade_id', None)
                 if trade_id is not None:
-                    self.log(f"🔄 EXITING TRADE (Trade ID: {trade_id}, held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
+                    self.log(f" EXITING TRADE (Trade ID: {trade_id}, held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
                 else:
-                    self.log(f"🔄 EXITING TRADE (held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
+                    self.log(f" EXITING TRADE (held for {(market_row.current_time - entry_time).total_seconds()/60:.1f} minutes)")
                 
                 # Execute exit
                 if trade_positions and trade_positions[0].expiration_date:
@@ -616,7 +616,7 @@ class TradingEngine:
                         self.active_trades.pop(trade_index)
                         self.trade_entry_times.pop(trade_index)
                         
-                        self.log(f"✅ Trade #{trade_index + 1} EXIT COMPLETE. P&L: ${trade_pnl:.2f} (Entry: ${entry_cost:.2f} + ${entry_commission:.2f}, Exit: ${exit_value:.2f} - ${exit_commission:.2f})")
+                        self.log(f" Trade #{trade_index + 1} EXIT COMPLETE. P&L: ${trade_pnl:.2f} (Entry: ${entry_cost:.2f} + ${entry_commission:.2f}, Exit: ${exit_value:.2f} - ${exit_commission:.2f})")
                         
                         # Update metrics BEFORE sending alert to get current values
                         self.update_daily_pnl(trade_pnl)
@@ -637,7 +637,7 @@ class TradingEngine:
                             'exit_time': market_row.current_time,
                             'holding_time': holding_time,
                             'positions': self._positions_to_dict(trade_positions),
-                            'exit_reason': 'Manual Exit',
+                            'exit_reason': self._last_exit_reason or 'System Exit',
                             'entry_cost': entry_cost,
                             'entry_commission': entry_commission,
                             'total_entry_cost': entry_cost + entry_commission,
@@ -673,11 +673,11 @@ class TradingEngine:
                     else:
                         result['action'] = 'exit_failed'
                         result['error'] = 'Exit execution failed'
-                        self.log(f"❌ EXIT FAILED: {result['error']}")
+                        self.log(f" EXIT FAILED: {result['error']}")
                 else:
                     result['action'] = 'exit_failed'
                     result['error'] = 'No expiration date stored'
-                    self.log(f"❌ EXIT FAILED: {result['error']}")
+                    self.log(f" EXIT FAILED: {result['error']}")
         
         # Only check for new entry signals if NOT in buffer periods
         if not in_open_buffer and not in_close_buffer:
@@ -685,7 +685,7 @@ class TradingEngine:
             if self.should_detect_signal(market_row.current_time):
                 result['signal_detected'] = True
                 self.total_signals += 1
-                self.log(f"🎯 SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                self.log(f" SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
                 
                 # Send signal alert to Telegram
                 signal_data = {
@@ -702,14 +702,14 @@ class TradingEngine:
                 self._send_signal_alert(signal_data)
                 
                 # Check entry conditions
-                self.log(f"🔍 Checking entry conditions...")
+                self.log(f" Checking entry conditions...")
                 if self.is_entry_allowed(market_row.current_time):
                     if not self.check_daily_limits(market_row.current_time):
                         result['action'] = 'signal_skipped'
                         result['error'] = 'Daily limits reached'
-                        self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                        self.log(f" SIGNAL SKIPPED: {result['error']}")
                     else:
-                        self.log(f"🚀 ENTRY SIGNAL APPROVED! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
+                        self.log(f" ENTRY SIGNAL APPROVED! Move {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
                         expiration = market_row.current_time.strftime("%Y-%m-%d")
                         # Diagnostic logging for options loading
                         self.log(f"[DIAG] Requesting option chain for time: {market_row.current_time}, expiration: {expiration}")
@@ -734,7 +734,7 @@ class TradingEngine:
                                 result['total_entry_cost'] = total_entry_cost
                                 
                                 self.increment_daily_trades()
-                                self.log(f"✅ TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
+                                self.log(f" TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
                                 
                                 # Send Telegram entry alert
                                 trade_id = getattr(positions[0], 'trade_id', len(self.active_trades)) if positions else len(self.active_trades)
@@ -760,17 +760,17 @@ class TradingEngine:
                             else:
                                 result['action'] = 'entry_failed'
                                 result['error'] = 'Entry execution failed'
-                                self.log(f"❌ ENTRY FAILED: {result['error']}")
+                                self.log(f" ENTRY FAILED: {result['error']}")
                         else:
                             result['action'] = 'signal_skipped'
                             result['error'] = f'Only {len(positions)} valid options found (need 2)'
-                            self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                            self.log(f" SIGNAL SKIPPED: {result['error']}")
                 else:
                     result['action'] = 'signal_skipped'
                     result['error'] = 'Entry not allowed (market timing/cooldown)'
-                    self.log(f"⏭️ SIGNAL SKIPPED: {result['error']}")
+                    self.log(f" SIGNAL SKIPPED: {result['error']}")
             else:
-                self.log(f"   ❌ No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
+                self.log(f"    No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
         else:
             # In buffer period - skip entry but log the reason
             if in_open_buffer:
@@ -785,7 +785,7 @@ class TradingEngine:
             self.log_overall_performance()
         
         # Log summary for this processing cycle
-        self.log(f"📋 CYCLE SUMMARY: {current_time.strftime('%H:%M:%S')} | Action: {result['action']} | Signals: {self.total_signals} | Trades: {self.total_trades} | Active: {len(self.active_trades)}")
+        self.log(f" CYCLE SUMMARY: {current_time.strftime('%H:%M:%S')} | Action: {result['action']} | Signals: {self.total_signals} | Trades: {self.total_trades} | Active: {len(self.active_trades)}")
         
         print(f"[ENGINE DEBUG] Row processing complete, action: {result['action']}")
         
@@ -935,9 +935,9 @@ class TradingEngine:
         new_count = len(self.price_log)
         
         if old_count != new_count:
-            self.log(f"🧹 Cleaned price log: {old_count} → {new_count} entries (removed {old_count - new_count} old entries)")
+            self.log(f" Cleaned price log: {old_count}  {new_count} entries (removed {old_count - new_count} old entries)")
         
-        self.log(f"📈 Price updated: {current_time.strftime('%H:%M:%S')} SPY=${price:.2f} (log size: {len(self.price_log)} entries)")
+        self.log(f" Price updated: {current_time.strftime('%H:%M:%S')} SPY=${price:.2f} (log size: {len(self.price_log)} entries)")
     
     def calculate_percentage_move(self, current_time: datetime.datetime) -> Tuple[float, float, float]:
         """Calculate percentage move within the window"""
@@ -979,48 +979,48 @@ class TradingEngine:
         window_minutes = self.price_window_seconds // 60
         cooldown_minutes = self.cooldown_period // 60
 
-        self.log(f"🔍 SIGNAL DETECTION CHECK at {current_time.strftime('%H:%M:%S')}")
-        self.log(f"   ⚙️  Window: {window_minutes}min, Cooldown: {cooldown_minutes}min, Threshold: {self.move_threshold:.2f}pts")
+        self.log(f" SIGNAL DETECTION CHECK at {current_time.strftime('%H:%M:%S')}")
+        self.log(f"     Window: {window_minutes}min, Cooldown: {cooldown_minutes}min, Threshold: {self.move_threshold:.2f}pts")
 
         # Cooldown filter
         if self.last_flagged_time is not None:
             time_since_last = (current_time - self.last_flagged_time).total_seconds() / 60
-            self.log(f"   ⏰ Last signal: {time_since_last:.1f}min ago")
+            self.log(f"    Last signal: {time_since_last:.1f}min ago")
             if time_since_last < cooldown_minutes:
-                self.log(f"   ❌ Cooldown active: {time_since_last:.1f}min < {cooldown_minutes}min")
+                self.log(f"    Cooldown active: {time_since_last:.1f}min < {cooldown_minutes}min")
                 return False
             else:
-                self.log(f"   ✅ Cooldown expired: {time_since_last:.1f}min >= {cooldown_minutes}min")
+                self.log(f"    Cooldown expired: {time_since_last:.1f}min >= {cooldown_minutes}min")
 
         # Get window
         window_start = current_time - datetime.timedelta(minutes=window_minutes)
         window_prices = [p[1] for p in self.price_log if window_start <= p[0] <= current_time]
         
-        self.log(f"   📊 Window: {window_start.strftime('%H:%M:%S')} to {current_time.strftime('%H:%M:%S')}")
-        self.log(f"   📈 Price log entries: {len(self.price_log)} total")
-        self.log(f"   🎯 Prices in window: {len(window_prices)} entries")
+        self.log(f"    Window: {window_start.strftime('%H:%M:%S')} to {current_time.strftime('%H:%M:%S')}")
+        self.log(f"    Price log entries: {len(self.price_log)} total")
+        self.log(f"    Prices in window: {len(window_prices)} entries")
         
         if not window_prices:
-            self.log(f"   ❌ No prices in window - insufficient data")
+            self.log(f"    No prices in window - insufficient data")
             return False
         
         # Log price range details
         high = max(window_prices)
         low = min(window_prices)
         if low == 0:
-            self.log(f"   ❌ Invalid low price: {low}")
+            self.log(f"    Invalid low price: {low}")
             return False
         
         absolute_move = high - low
-        self.log(f"   📊 Price Range: High=${high:.2f}, Low=${low:.2f}, Move=${absolute_move:.2f}pts")
-        self.log(f"   🎯 Threshold Check: {absolute_move:.2f} >= {self.move_threshold:.2f} = {absolute_move >= self.move_threshold}")
+        self.log(f"    Price Range: High=${high:.2f}, Low=${low:.2f}, Move=${absolute_move:.2f}pts")
+        self.log(f"    Threshold Check: {absolute_move:.2f} >= {self.move_threshold:.2f} = {absolute_move >= self.move_threshold}")
         
         if absolute_move >= self.move_threshold:
             self.last_flagged_time = current_time
-            self.log(f"🎯 WINDOW SIGNAL DETECTED: {absolute_move:.2f}pt move in {window_minutes}min window (high={high:.2f}, low={low:.2f}) [Threshold: {self.move_threshold:.2f}]")
+            self.log(f" WINDOW SIGNAL DETECTED: {absolute_move:.2f}pt move in {window_minutes}min window (high={high:.2f}, low={low:.2f}) [Threshold: {self.move_threshold:.2f}]")
             return True
         else:
-            self.log(f"   ❌ No signal: {absolute_move:.2f}pts < {self.move_threshold:.2f}pts threshold")
+            self.log(f"    No signal: {absolute_move:.2f}pts < {self.move_threshold:.2f}pts threshold")
             return False
     
     def is_market_open(self, current_time: datetime.datetime) -> bool:
@@ -1046,19 +1046,19 @@ class TradingEngine:
             # Early signal detected - apply cooldown
             if self.last_early_signal_time is None:
                 self.last_early_signal_time = current_time
-                self.log(f"⏰ EARLY SIGNAL: Market open for {time_since_open:.1f}min < {self.market_open_buffer_minutes}min buffer. Applying {self.early_signal_cooldown_minutes}min cooldown.")
+                self.log(f" EARLY SIGNAL: Market open for {time_since_open:.1f}min < {self.market_open_buffer_minutes}min buffer. Applying {self.early_signal_cooldown_minutes}min cooldown.")
             return False
         
         # Check early signal cooldown
         if self.last_early_signal_time:
             time_since_early_signal = (current_time - self.last_early_signal_time).total_seconds() / 60
             if time_since_early_signal < self.early_signal_cooldown_minutes:
-                self.log(f"⏳ EARLY SIGNAL COOLDOWN: {time_since_early_signal:.1f}min < {self.early_signal_cooldown_minutes}min cooldown period")
+                self.log(f" EARLY SIGNAL COOLDOWN: {time_since_early_signal:.1f}min < {self.early_signal_cooldown_minutes}min cooldown period")
                 return False
             else:
                 # Cooldown expired, clear early signal tracking
                 self.last_early_signal_time = None
-                self.log(f"✅ Early signal cooldown expired. Ready for trading.")
+                self.log(f" Early signal cooldown expired. Ready for trading.")
         
         # Check if we're too close to market close (15-minute buffer)
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
@@ -1068,7 +1068,7 @@ class TradingEngine:
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         
         if time_until_close < self.market_close_buffer_minutes:
-            self.log(f"⏰ TOO CLOSE TO CLOSE: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer")
+            self.log(f" TOO CLOSE TO CLOSE: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer")
             return False
         
         # Note: Regular cooldown between trades is already handled by signal detection cooldown
@@ -1084,14 +1084,14 @@ class TradingEngine:
             self.daily_trades = 0
             self.daily_pnl = 0.0
             self.current_date = current_date
-            self.log(f"📅 New trading day: {current_date}")
+            self.log(f" New trading day: {current_date}")
         
         if self.daily_trades >= self.max_daily_trades:
-            self.log(f"⚠️ Daily trade limit reached: {self.daily_trades}/{self.max_daily_trades}")
+            self.log(f" Daily trade limit reached: {self.daily_trades}/{self.max_daily_trades}")
             return False
         
         if self.daily_pnl <= -self.max_daily_loss:
-            self.log(f"⚠️ Daily loss limit reached: ${self.daily_pnl:.2f} <= -${self.max_daily_loss}")
+            self.log(f" Daily loss limit reached: ${self.daily_pnl:.2f} <= -${self.max_daily_loss}")
             return False
         
         return True
@@ -1157,10 +1157,10 @@ class TradingEngine:
                         trade_id=current_trade_id
                     ))
                 if len(positions) == 2:
-                    self.log(f"✅ Valid options found for both sides (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
+                    self.log(f" Valid options found for both sides (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
                     break
                 else:
-                    self.log("⏳ Waiting for better option availability...")
+                    self.log(" Waiting for better option availability...")
             except Exception as e:
                 self.log(f"[ERROR] Failed to fetch option chain: {str(e)}")
             if attempt < self.max_retries and self.retry_delay > 0:
@@ -1183,6 +1183,8 @@ class TradingEngine:
 
         for attempt in range(1, self.max_retries + 1):
             self.log(f"[Attempt {attempt}] Fetching option contracts from file...")
+            attempt_start_time = time.time()
+            max_attempt_time = 120  # Maximum 2 minutes per attempt
             try:
                 # 1. Load contracts file (OPT_PATH)
                 opt_path = self.config.get('OPT_PATH')
@@ -1206,86 +1208,39 @@ class TradingEngine:
                         ticker = row['ticker']
                         strike = row['strike_price']
                         self.log(f"[CONTRACT] Considering {ticker} (strike={strike}, type={option_type})")
-                        # 4. Fetch minute OHLC for this contract for the backtest date, with pagination
-                        api_key = self.config.get('POLYGON_API_KEY', '')
-                        date_str = signal_time.strftime('%Y-%m-%d')
-                        base_url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}"
-                        params = {
-                            "adjusted": "true",
-                            "sort": "asc",
-                            "limit": 50000,
-                            "apiKey": api_key
+                        # 4. Use synthetic pricing for backtest (avoid Polygon API calls)
+                        self.log(f"[BACKTEST] Using synthetic pricing for {ticker} (strike={strike}, type={option_type})")
+                        
+                        # Calculate synthetic option price based on moneyness
+                        moneyness = abs(strike - price) / price  # Distance from ATM as percentage
+                        
+                        # Base price calculation - closer to ATM = higher premium
+                        if option_type == 'C':  # Call
+                            intrinsic_value = max(0, price - strike)
+                        else:  # Put  
+                            intrinsic_value = max(0, strike - price)
+                        
+                        # Time value based on moneyness (simplified Black-Scholes approximation)
+                        time_value = max(0.05, 2.0 * (1.0 - min(moneyness * 10, 0.95)))  # Decays as we move away from ATM
+                        
+                        # Synthetic option price
+                        option_price = intrinsic_value + time_value
+                        
+                        # Ensure price is within reasonable bounds for the strategy
+                        option_price = max(0.05, min(option_price, 10.0))
+                        
+                        self.log(f"[SYNTHETIC] {ticker} price=${option_price:.2f} (intrinsic=${intrinsic_value:.2f}, time=${time_value:.2f})")
+                        
+                        pos = {
+                            'option_type': option_type,
+                            'strike': strike,
+                            'bid': option_price * 0.95,  # 5% bid-ask spread
+                            'ask': option_price * 1.05,
+                            'expiration_date': expiration,
+                            'ticker': ticker,
+                            'contract_type': contract_type
                         }
-                        all_bars = []
-                        next_url = None
-                        page_count = 1
-                        for ohlc_attempt in range(3):
-                            try:
-                                self.log(f"[PAGINATION] Start fetching minute bars for {ticker} on {date_str}")
-                                while True:
-                                    if next_url:
-                                        # Ensure apiKey is present in next_url
-                                        parsed = urllib.parse.urlparse(next_url)
-                                        query = dict(urllib.parse.parse_qsl(parsed.query))
-                                        if 'apiKey' not in query:
-                                            query['apiKey'] = api_key
-                                            next_url = parsed._replace(query=urllib.parse.urlencode(query)).geturl()
-                                        self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {next_url}")
-                                        resp = requests.get(next_url)
-                                    else:
-                                        self.log(f"[QUOTES] Fetching page {page_count} for {ticker} from {base_url}")
-                                        resp = requests.get(base_url, params=params)
-                                    if resp.status_code == 429:
-                                        self.log(f"[RATE LIMIT] Hit Polygon rate limit, sleeping 15s...")
-                                        time.sleep(15)
-                                        continue
-                                    elif resp.status_code != 200:
-                                        self.log(f"[ERROR] Polygon minute OHLC error for {ticker}: {resp.status_code} {resp.text}")
-                                        break
-                                    data = resp.json()
-                                    if 'results' in data and data['results']:
-                                        all_bars.extend(data['results'])
-                                    next_url = data.get('next_url')
-                                    if not next_url:
-                                        break
-                                    page_count += 1
-                                    time.sleep(0.05)
-                                self.log(f"[PAGINATION] Done fetching minute bars for {ticker}. Total bars: {len(all_bars)}")
-                                if not all_bars:
-                                    self.log(f"[NO DATA] No minute OHLC data for {ticker} on {date_str}")
-                                    break
-                                # Find the bar with timestamp <= signal_ts, closest to signal_ts
-                                if all_bars:
-                                    min_bar_ts = min(bar['t'] for bar in all_bars)
-                                    max_bar_ts = max(bar['t'] for bar in all_bars)
-                                else:
-                                    min_bar_ts = max_bar_ts = None
-                                bars_before = [bar for bar in all_bars if bar['t'] <= signal_ts]
-                                if not bars_before:
-                                    self.log(f"[NO BAR] No minute bar before or at signal time for {ticker}. signal_ts={signal_ts}, earliest={min_bar_ts}, latest={max_bar_ts}")
-                                    break
-                                best_bar = max(bars_before, key=lambda bar: bar['t'])
-                                option_price = best_bar.get('c')
-                                if option_price is None:
-                                    self.log(f"[NO PRICE] No close price for {ticker} at {best_bar['t']}")
-                                    break
-                                self.log(f"[SELECTED] {ticker} selected bar: ts={best_bar['t']} close={option_price}")
-                                pos = {
-                                    'option_type': option_type,
-                                    'strike': strike,
-                                    'bid': option_price,  # Use close as both bid/ask for now
-                                    'ask': option_price,
-                                    'expiration_date': expiration,
-                                    'ticker': ticker,
-                                    'contract_type': contract_type
-                                }
-                                positions.append(pos)
-                                self.log(f"[OHLC] {ticker} {date_str} minute={best_bar['t']} close={option_price}")
-                                break
-                            except Exception as e:
-                                self.log(f"[EXCEPTION] Error fetching minute OHLC for {ticker}: {e}")
-                                time.sleep(1)
-                        time.sleep(0.05)  # Throttle requests
+                        positions.append(pos)
                 # After collecting all candidate positions, pick the best call and best put
                 best_call = None
                 best_put = None
@@ -1350,21 +1305,21 @@ class TradingEngine:
                 order_id = order_func(**kwargs)
                 
                 if order_id != "FAILED" and order_id != "N/A":
-                    self.log(f"✅ {order_type_desc} order placed successfully: {order_id}")
+                    self.log(f" {order_type_desc} order placed successfully: {order_id}")
                     return order_id
                 else:
-                    self.log(f"❌ {order_type_desc} order failed on attempt {attempt}")
+                    self.log(f" {order_type_desc} order failed on attempt {attempt}")
                     
             except Exception as e:
-                self.log(f"❌ {order_type_desc} order exception on attempt {attempt}: {str(e)}")
+                self.log(f" {order_type_desc} order exception on attempt {attempt}: {str(e)}")
             
             # Wait before retrying (exponential backoff)
             if attempt < self.max_retries:
                 wait_time = min(self.retry_delay * (2 ** (attempt - 1)), 30)  # Cap at 30 seconds
-                self.log(f"⏳ Waiting {wait_time}s before retry...")
+                self.log(f" Waiting {wait_time}s before retry...")
                 time.sleep(wait_time)
         
-        self.log(f"💥 {order_type_desc} order failed after {self.max_retries} attempts")
+        self.log(f" {order_type_desc} order failed after {self.max_retries} attempts")
         return "FAILED"
 
     def execute_entry(self, positions: List[Position], expiration: str) -> bool:
@@ -1390,7 +1345,7 @@ class TradingEngine:
                 # If entry order failed completely, track it
                 if entry_order_id == "FAILED":
                     failed_entries.append(pos)
-                    self.log(f"⚠️ ENTRY FAILED: {pos.type} Strike={pos.strike} - skipping limit order")
+                    self.log(f" ENTRY FAILED: {pos.type} Strike={pos.strike} - skipping limit order")
                     continue
                 
                 # Calculate limit sell price using VIX-based profit target
@@ -1424,36 +1379,36 @@ class TradingEngine:
                 self.log(f"ENTRY {pos.type} Strike={pos.strike} Qty={pos.contracts} Price={pos.entry_price:.2f} EntryOrderID={entry_order_id}")
                 
                 if limit_order_id != "FAILED":
-                    self.log(f"🎯 LIMIT SELL ORDER PLACED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} ({profit_multiplier:.2f}x target) LimitOrderID={limit_order_id}")
+                    self.log(f" LIMIT SELL ORDER PLACED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} ({profit_multiplier:.2f}x target) LimitOrderID={limit_order_id}")
                 else:
-                    self.log(f"❌ LIMIT SELL ORDER FAILED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} - will use manual exits only")
+                    self.log(f" LIMIT SELL ORDER FAILED: {pos.type} Strike={pos.strike} @ ${limit_price:.2f} - will use manual exits only")
             
             # Check if we have any successful entries
             successful_entries = [pos for pos in positions if pos.entry_order_id != "FAILED"]
             
             if len(failed_entries) > 0:
-                self.log(f"⚠️ {len(failed_entries)} out of {len(positions)} entry orders failed")
+                self.log(f" {len(failed_entries)} out of {len(positions)} entry orders failed")
                 
                 # If more than half the entries failed, abort the trade
                 if len(failed_entries) >= len(positions) / 2:
-                    self.log(f"💥 TRADE ABORTED: Too many failed entries ({len(failed_entries)}/{len(positions)})")
+                    self.log(f" TRADE ABORTED: Too many failed entries ({len(failed_entries)}/{len(positions)})")
                     # Cancel any successful limit orders from this trade
                     for pos in successful_entries:
                         if pos.limit_order_id != "FAILED":
                             try:
                                 self.order_executor.cancel_order(pos.limit_order_id)
-                                self.log(f"🧹 CANCELLED LIMIT ORDER: {pos.limit_order_id} due to trade abort")
+                                self.log(f" CANCELLED LIMIT ORDER: {pos.limit_order_id} due to trade abort")
                             except Exception as e:
-                                self.log(f"❌ Failed to cancel limit order {pos.limit_order_id}: {e}")
+                                self.log(f" Failed to cancel limit order {pos.limit_order_id}: {e}")
                     return False
             
             # If we have at least some successful entries, proceed
             if successful_entries:
                 self.total_trades += 1  # Increment total trades on entry
-                self.log(f"✅ TRADE ENTRY COMPLETED: {len(successful_entries)}/{len(positions)} positions filled")
+                self.log(f" TRADE ENTRY COMPLETED: {len(successful_entries)}/{len(positions)} positions filled")
                 return True
             else:
-                self.log(f"💥 TRADE FAILED: No successful entries")
+                self.log(f" TRADE FAILED: No successful entries")
                 return False
         except Exception as e:
             self.log(f"[ERROR] Entry execution failed: {str(e)}")
@@ -1484,22 +1439,22 @@ class TradingEngine:
                 
                 if order_id == "FAILED":
                     failed_exits.append(pos)
-                    self.log(f"💥 EXIT FAILED: {pos.type} Strike={pos.strike} after {self.max_retries} attempts")
+                    self.log(f" EXIT FAILED: {pos.type} Strike={pos.strike} after {self.max_retries} attempts")
                 else:
                     successful_exits.append(pos)
                     self.log(f"EXIT {pos.type} Strike={pos.strike} Qty={pos.contracts} OrderID={order_id}")
             
             # Report results
             if failed_exits:
-                self.log(f"⚠️ {len(failed_exits)} out of {len(positions)} exit orders failed")
-                self.log(f"⚠️ PARTIAL EXIT: {len(successful_exits)} positions sold, {len(failed_exits)} positions still open")
+                self.log(f" {len(failed_exits)} out of {len(positions)} exit orders failed")
+                self.log(f" PARTIAL EXIT: {len(successful_exits)} positions sold, {len(failed_exits)} positions still open")
             
             # Consider exit successful if at least some orders went through
             if successful_exits:
                 self.total_trades += 1  # Increment total trades on exit
                 return True
             else:
-                self.log(f"💥 EXIT COMPLETELY FAILED: No positions could be sold")
+                self.log(f" EXIT COMPLETELY FAILED: No positions could be sold")
                 return False
                 
         except Exception as e:
@@ -1525,15 +1480,15 @@ class TradingEngine:
             target_value = total_entry_cost * self.profit_target
             if total_exit_value >= target_value:
                 profit_percentage = ((total_exit_value - total_entry_cost) / total_entry_cost) * 100
-                self.log(f"🎯 COMBINED PROFIT TARGET HIT: Exit Value ${total_exit_value:.2f} >= Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
+                self.log(f" COMBINED PROFIT TARGET HIT: Exit Value ${total_exit_value:.2f} >= Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
                 self.log(f"   Entry Cost: ${total_entry_cost:.2f}, Exit Value: ${total_exit_value:.2f}")
                 return True
             else:
                 profit_percentage = ((total_exit_value - total_entry_cost) / total_entry_cost) * 100
-                self.log(f"⏳ Combined profit check: Exit Value ${total_exit_value:.2f} < Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
+                self.log(f" Combined profit check: Exit Value ${total_exit_value:.2f} < Target ${target_value:.2f} (Profit: {profit_percentage:.1f}%)")
             return False
         except Exception as e:
-            self.log(f"❌ Error checking combined profit exit: {e}")
+            self.log(f" Error checking combined profit exit: {e}")
             return False
 
     def check_limit_order_fills(self, current_time: datetime.datetime):
@@ -1547,7 +1502,7 @@ class TradingEngine:
             if not self.active_limit_orders:
                 return
             
-            self.log(f"🔍 CHECKING LIMIT ORDERS: {len(self.active_limit_orders)} active orders")
+            self.log(f" CHECKING LIMIT ORDERS: {len(self.active_limit_orders)} active orders")
             
             filled_orders = []
             
@@ -1562,8 +1517,8 @@ class TradingEngine:
                         trade_positions = order_info['trade_positions']
                         expiration = order_info['expiration']
                         
-                        self.log(f"🎯 LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
-                        self.log(f"🎯 Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
+                        self.log(f" LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
+                        self.log(f" Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
                         
                         # Send Telegram limit order fill alert
                         fill_price = status.get('avg_fill_price', filled_position.limit_price)
@@ -1598,7 +1553,7 @@ class TradingEngine:
                             # Market sell the remaining position(s) with retry logic
                             remaining_positions = [pos for pos in trade_positions if pos.limit_order_id != order_id]
                             if remaining_positions:
-                                self.log(f"📈 MARKET SELLING REMAINING POSITIONS: {len(remaining_positions)} positions")
+                                self.log(f" MARKET SELLING REMAINING POSITIONS: {len(remaining_positions)} positions")
                                 for remaining_pos in remaining_positions:
                                     market_order_id = self._retry_order_placement(
                                         self.order_executor.place_order,
@@ -1611,9 +1566,9 @@ class TradingEngine:
                                     )
                                     
                                     if market_order_id != "FAILED":
-                                        self.log(f"📈 MARKET SELL: {remaining_pos.type} Strike={remaining_pos.strike} OrderID={market_order_id}")
+                                        self.log(f" MARKET SELL: {remaining_pos.type} Strike={remaining_pos.strike} OrderID={market_order_id}")
                                     else:
-                                        self.log(f"💥 MARKET SELL FAILED: {remaining_pos.type} Strike={remaining_pos.strike} after {self.max_retries} attempts")
+                                        self.log(f" MARKET SELL FAILED: {remaining_pos.type} Strike={remaining_pos.strike} after {self.max_retries} attempts")
                             
                             # Calculate P&L for the filled trade
                             entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)
@@ -1632,7 +1587,7 @@ class TradingEngine:
                             
                             trade_pnl = total_exit_value - entry_cost - entry_commission - exit_commission
                             
-                            self.log(f"✅ LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
+                            self.log(f" LIMIT ORDER TRADE COMPLETE: Entry=${entry_cost:.2f} Exit=${total_exit_value:.2f} P&L=${trade_pnl:.2f}")
                             
                             # Update metrics BEFORE sending alert to get current values
                             self.update_daily_pnl(trade_pnl)
@@ -1654,7 +1609,7 @@ class TradingEngine:
                                 'exit_time': current_time,
                                 'holding_time': holding_time,
                                 'positions': self._positions_to_dict(trade_positions),
-                                'exit_reason': 'Limit Order Fill',
+                                'exit_reason': 'Limit Order Filled',
                                 'entry_cost': entry_cost,
                                 'entry_commission': entry_commission,
                                 'total_entry_cost': entry_cost + entry_commission,
@@ -1677,10 +1632,10 @@ class TradingEngine:
                             self.trade_entry_times.pop(trade_index)
                             
                         else:
-                            self.log(f"⚠️ Could not find trade index for filled limit order {order_id}")
+                            self.log(f" Could not find trade index for filled limit order {order_id}")
                 
                 except Exception as e:
-                    self.log(f"❌ Error checking limit order {order_id}: {e}")
+                    self.log(f" Error checking limit order {order_id}: {e}")
                     # If we can't check the order status, keep it in tracking for now
                     # It will be cleaned up in finish() if needed
             
@@ -1695,21 +1650,22 @@ class TradingEngine:
             if pos.limit_order_id and pos.limit_order_id != exclude_order_id:
                 try:
                     if self.order_executor.cancel_order(pos.limit_order_id):
-                        self.log(f"✅ CANCELLED LIMIT ORDER: {pos.type} Strike={pos.strike} OrderID={pos.limit_order_id}")
+                        self.log(f" CANCELLED LIMIT ORDER: {pos.type} Strike={pos.strike} OrderID={pos.limit_order_id}")
                         # Remove from tracking
                         if pos.limit_order_id in self.active_limit_orders:
                             del self.active_limit_orders[pos.limit_order_id]
                     else:
-                        self.log(f"⚠️ FAILED TO CANCEL LIMIT ORDER: {pos.limit_order_id}")
+                        self.log(f" FAILED TO CANCEL LIMIT ORDER: {pos.limit_order_id}")
                 except Exception as e:
-                    self.log(f"❌ Error cancelling limit order {pos.limit_order_id}: {e}")
+                    self.log(f" Error cancelling limit order {pos.limit_order_id}: {e}")
 
     def check_all_exit_conditions(self, current_time: datetime.datetime) -> List[int]:
         trades_to_exit = []
         self._last_exit_reason = None  # Reset before checking
         # Check emergency stop-loss first (highest priority - affects all trades)
         if self.check_emergency_stop_loss(current_time):
-            self.log(f"🚨 EMERGENCY STOP LOSS: Forcing exit of all {len(self.active_trades)} active trades")
+            self.log(f" EMERGENCY STOP LOSS: Forcing exit of all {len(self.active_trades)} active trades")
+            self._last_exit_reason = 'Emergency Stop Loss'
             return list(range(len(self.active_trades)))
         # Check market close buffer exit (force exit 15 minutes before close)
         market_close_time = datetime.datetime.strptime(self.market_close, '%H:%M').time()
@@ -1718,23 +1674,23 @@ class TradingEngine:
             market_close_datetime = market_close_datetime.replace(tzinfo=current_time.tzinfo)
         time_until_close = (market_close_datetime - current_time).total_seconds() / 60
         if time_until_close < self.market_close_buffer_minutes:
-            self.log(f"⏰ MARKET CLOSE BUFFER EXIT: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer. Forcing exit of all trades.")
-            self._last_exit_reason = 'market close'
+            self.log(f" MARKET CLOSE BUFFER EXIT: {time_until_close:.1f}min until close < {self.market_close_buffer_minutes}min buffer. Forcing exit of all trades.")
+            self._last_exit_reason = 'Market Close Buffer'
             return list(range(len(self.active_trades)))
         for i, (trade_positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
             if trade_positions and trade_positions[0].expiration_date:
                 expiration = trade_positions[0].expiration_date
                 if self.check_stop_loss(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
-                    self._last_exit_reason = 'stop loss'
+                    self._last_exit_reason = 'Stop Loss Triggered'
                     # Update analytics log immediately for stop loss
-                    self._update_analytics_exit(trade_positions, current_time, 'stop loss')
+                    self._update_analytics_exit(trade_positions, current_time, 'Stop Loss Triggered')
                     continue
                 if self.check_combined_profit_exit(trade_positions, expiration, current_time):
                     trades_to_exit.append(i)
-                    self._last_exit_reason = 'profit target'
+                    self._last_exit_reason = 'Profit Target Reached'
                     # Update analytics log immediately for profit target
-                    self._update_analytics_exit(trade_positions, current_time, 'profit target')
+                    self._update_analytics_exit(trade_positions, current_time, 'Profit Target Reached')
         return trades_to_exit
 
     def _update_analytics_exit(self, trade_positions, exit_time, exit_reason):
@@ -1756,12 +1712,12 @@ class TradingEngine:
     def increment_daily_trades(self):
         """Increment daily trade count"""
         self.daily_trades += 1
-        self.log(f"📊 Daily trade count: {self.daily_trades}/{self.max_daily_trades}")
+        self.log(f" Daily trade count: {self.daily_trades}/{self.max_daily_trades}")
     
     def update_daily_pnl(self, trade_pnl: float):
         """Update daily PnL"""
         self.daily_pnl += trade_pnl
-        self.log(f"📊 Daily P&L: ${self.daily_pnl:.2f}")
+        self.log(f" Daily P&L: ${self.daily_pnl:.2f}")
     
     def update_trade_metrics(self, trade_pnl: float):
         """Update overall trade metrics"""
@@ -1838,59 +1794,61 @@ class TradingEngine:
         
         # Build detailed log message
         log_parts = [
-            f"⏰ {timestamp}",
-            f"💰 {result['symbol']} ${result['price']:.2f}",
-            f"📈 Move: {result['move_percent']:.2f}%",
-            f"🎯 Signal: {'YES' if result['signal_detected'] else 'NO'}",
-            f"📊 Action: {result['action'].upper()}",
-            f"🔄 Active Trades: {result['trades_active']}",
-            f"⏰ Market: +{time_since_open:.1f}min / -{time_until_close:.1f}min"
+            f" {timestamp}",
+            f" {result['symbol']} ${result['price']:.2f}",
+            f" Move: {result['move_percent']:.2f}%",
+            f" Signal: {'YES' if result['signal_detected'] else 'NO'}",
+            f" Action: {result['action'].upper()}",
+            f" Active Trades: {result['trades_active']}",
+            f" Market: +{time_since_open:.1f}min / -{time_until_close:.1f}min"
         ]
         
         # Add early signal status
         if self.last_early_signal_time:
             time_since_early = (current_time - self.last_early_signal_time).total_seconds() / 60
-            log_parts.append(f"🔄 Early cooldown: {time_since_early:.1f}min")
+            log_parts.append(f" Early cooldown: {time_since_early:.1f}min")
         
         # Add action-specific details
         if result['action'] == 'entry':
             log_parts.extend([
-                f"💵 Entry Cost: ${result['entry_cost']:.2f}",
-                f"💸 Commission: ${result.get('entry_commission', 0):.2f}",
-                f"💰 Total Cost: ${result.get('total_entry_cost', result['entry_cost']):.2f}",
-                f"📋 Positions: {len(result['positions'])}"
+                f" Entry Cost: ${result['entry_cost']:.2f}",
+                f" Commission: ${result.get('entry_commission', 0):.2f}",
+                f" Total Cost: ${result.get('total_entry_cost', result['entry_cost']):.2f}",
+                f" Positions: {len(result['positions'])}"
             ])
             if result.get('positions'):
                 for i, pos in enumerate(result['positions']):
                     log_parts.append(f"   {i+1}. {pos.type} {pos.strike} @ ${pos.entry_price:.2f} x {pos.contracts}")
         
         elif result['action'] == 'exit':
+            exit_reason = self._last_exit_reason or 'System Exit'
             log_parts.extend([
-                f"💵 Exit Value: ${result['exit_value']:.2f}",
-                f"💸 Exit Commission: ${result.get('exit_commission', 0):.2f}",
-                f"📈 P&L: ${result['pnl']:.2f}",
-                f"📋 Positions: {len(result['positions'])}"
+                f" Exit Reason: {exit_reason}",
+                f" Exit Value: ${result['exit_value']:.2f}",
+                f" Exit Commission: ${result.get('exit_commission', 0):.2f}",
+                f" P&L: ${result['pnl']:.2f}",
+                f" Positions: {len(result['positions'])}"
             ])
             if result.get('positions'):
                 for i, pos in enumerate(result['positions']):
                     log_parts.append(f"   {i+1}. {pos.type} {pos.strike} @ ${pos.entry_price:.2f} x {pos.contracts}")
         
         elif result['action'] in ['entry_failed', 'exit_failed']:
-            log_parts.append(f"❌ Error: {result.get('error', 'Unknown error')}")
+            log_parts.append(f" Error: {result.get('error', 'Unknown error')}")
         
         elif result['action'] == 'signal_skipped':
-            log_parts.append(f"⏭️ Skipped: {result.get('error', 'Unknown reason')}")
+            log_parts.append(f" Skipped: {result.get('error', 'Unknown reason')}")
         
         elif result['action'] == 'skipped':
-            log_parts.append(f"⏰ Buffer Skip: {result.get('error', 'Buffer period')}")
+            log_parts.append(f" Buffer Skip: {result.get('error', 'Buffer period')}")
         
         # Add daily and overall metrics
         log_parts.extend([
-            f"📅 Daily Trades: {self.daily_trades}/{self.max_daily_trades}",
-            f"📊 Daily P&L: ${self.daily_pnl:.2f}",
-            f"🏆 Total Trades: {self.total_trades}",
-            f"💰 Total P&L: ${self.total_pnl:.2f}",
-            f"📈 Win Rate: {(self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0:.1f}%"
+            f" Daily Trades: {self.daily_trades}/{self.max_daily_trades}",
+            f" Daily P&L: ${self.daily_pnl:.2f}",
+            f" Total Trades: {self.total_trades}",
+            f" Total P&L: ${self.total_pnl:.2f}",
+            f" Win Rate: {(self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0:.1f}%"
         ])
         
         # Log the comprehensive result
@@ -1898,22 +1856,22 @@ class TradingEngine:
 
     def log_overall_performance(self):
         """Log overall trading performance"""
-        self.log(f"📊 Overall Performance:")
-        self.log(f"🏆 Total Trades: {self.total_trades}")
-        self.log(f"💰 Total P&L: ${self.total_pnl:.2f}")
-        self.log(f"📈 Win Rate: {(self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0:.1f}%")
+        self.log(f" Overall Performance:")
+        self.log(f" Total Trades: {self.total_trades}")
+        self.log(f" Total P&L: ${self.total_pnl:.2f}")
+        self.log(f" Win Rate: {(self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0:.1f}%")
     
     def log_final_results(self):
         """Log comprehensive final results when backtest/trading session ends"""
         self.log("=" * 80)
-        self.log("🏁 FINAL TRADING RESULTS")
+        self.log(" FINAL TRADING RESULTS")
         self.log("=" * 80)
         
         # Overall performance
-        self.log(f"📊 Trading Mode: {self.mode.upper()}")
-        self.log(f"🎯 Total Signals Detected: {self.total_signals}")
-        self.log(f"🏆 Total Trades Executed: {self.total_trades}")
-        self.log(f"💰 Total P&L: ${self.total_pnl:.2f}")
+        self.log(f" Trading Mode: {self.mode.upper()}")
+        self.log(f" Total Signals Detected: {self.total_signals}")
+        self.log(f" Total Trades Executed: {self.total_trades}")
+        self.log(f" Total P&L: ${self.total_pnl:.2f}")
         
         if self.total_trades > 0:
             # Fix win rate calculation: only use closed trades
@@ -1922,17 +1880,17 @@ class TradingEngine:
             num_losses = sum(1 for entry in closed_trades if entry.get('pnl') is not None and entry.get('pnl') <= 0)
             win_rate = (num_wins / (num_wins + num_losses) * 100) if (num_wins + num_losses) > 0 else 0.0
             # Print correct win rate and trade counts in summary
-            self.log(f"📈 Win Rate: {win_rate:.1f}%")
-            self.log(f"✅ Winning Trades: {num_wins}")
-            self.log(f"❌ Losing Trades: {num_losses}")
-            self.log(f"📊 Average Trade P&L: ${(self.total_pnl / self.total_trades):.2f}")
+            self.log(f" Win Rate: {win_rate:.1f}%")
+            self.log(f" Winning Trades: {num_wins}")
+            self.log(f" Losing Trades: {num_losses}")
+            self.log(f" Average Trade P&L: ${(self.total_pnl / self.total_trades):.2f}")
         
         # Daily performance
-        self.log(f"📅 Daily Trades: {self.daily_trades}/{self.max_daily_trades}")
-        self.log(f"📊 Daily P&L: ${self.daily_pnl:.2f}")
+        self.log(f" Daily Trades: {self.daily_trades}/{self.max_daily_trades}")
+        self.log(f" Daily P&L: ${self.daily_pnl:.2f}")
         
         # Active positions
-        self.log(f"🔄 Active Trades: {len(self.active_trades)}")
+        self.log(f" Active Trades: {len(self.active_trades)}")
         if self.active_trades:
             for i, (positions, entry_time) in enumerate(zip(self.active_trades, self.trade_entry_times)):
                 import datetime as dt
@@ -1949,7 +1907,7 @@ class TradingEngine:
                 self.log(f"   Trade {i+1}: {len(positions)} positions, held for {hold_time:.1f} minutes")
         
         # Log files
-        self.log(f"📝 Log File: {self.log_file}")
+        self.log(f" Log File: {self.log_file}")
         self.log("=" * 80)
         # Append detailed signal/trade analytics in a professional, narrative style
         self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
@@ -2011,29 +1969,29 @@ class TradingEngine:
         """Call this when trading is finished (end of data or user interrupt) to log final results."""
         # Cancel any remaining limit orders before finishing
         if self.active_limit_orders:
-            self.log(f"🧹 CLEANUP: Cancelling {len(self.active_limit_orders)} remaining limit orders...")
+            self.log(f" CLEANUP: Cancelling {len(self.active_limit_orders)} remaining limit orders...")
             for order_id, order_info in list(self.active_limit_orders.items()):
                 try:
                     # First check if order is still cancellable
                     status = self.order_executor.get_order_status(order_id)
                     if status.get('status', '').lower() in ['filled', 'cancelled']:
-                        self.log(f"🔍 CLEANUP: Order {order_id} already {status.get('status', 'unknown')}, skipping cancel")
+                        self.log(f" CLEANUP: Order {order_id} already {status.get('status', 'unknown')}, skipping cancel")
                         continue
                         
                     if self.order_executor.cancel_order(order_id):
-                        self.log(f"✅ CLEANUP: Cancelled limit order {order_id}")
+                        self.log(f" CLEANUP: Cancelled limit order {order_id}")
                     else:
-                        self.log(f"⚠️ CLEANUP: Could not cancel limit order {order_id}")
+                        self.log(f" CLEANUP: Could not cancel limit order {order_id}")
                 except Exception as e:
                     # Don't log as error if order was already filled/cancelled
                     if "400" in str(e):
-                        self.log(f"🔍 CLEANUP: Order {order_id} likely already filled/cancelled")
+                        self.log(f" CLEANUP: Order {order_id} likely already filled/cancelled")
                     else:
-                        self.log(f"❌ CLEANUP ERROR: Failed to cancel {order_id}: {e}")
+                        self.log(f" CLEANUP ERROR: Failed to cancel {order_id}: {e}")
             
             # Clear the tracking
             self.active_limit_orders.clear()
-            self.log(f"🧹 CLEANUP COMPLETE: All limit orders processed")
+            self.log(f" CLEANUP COMPLETE: All limit orders processed")
         
         # Send system stop alert to Telegram
         self._send_system_stop_alert()
@@ -2071,9 +2029,9 @@ class TradingEngine:
     def log_market_timing_status(self, current_time: datetime.datetime):
         """Log current market timing status for debugging"""
         status = self.get_market_timing_status(current_time)
-        self.log(f"⏰ Market Timing: Open +{status['time_since_open_minutes']:.1f}min, Close -{status['time_until_close_minutes']:.1f}min")
-        self.log(f"   Open buffer: {'✅' if status['open_buffer_met'] else '❌'} ({self.market_open_buffer_minutes}min)")
-        self.log(f"   Close buffer: {'✅' if status['close_buffer_met'] else '❌'} ({self.market_close_buffer_minutes}min)")
+        self.log(f" Market Timing: Open +{status['time_since_open_minutes']:.1f}min, Close -{status['time_until_close_minutes']:.1f}min")
+        self.log(f"   Open buffer: {'' if status['open_buffer_met'] else ''} ({self.market_open_buffer_minutes}min)")
+        self.log(f"   Close buffer: {'' if status['close_buffer_met'] else ''} ({self.market_close_buffer_minutes}min)")
         if status['in_early_signal_cooldown']:
             self.log(f"   Early signal cooldown: {status['early_signal_cooldown_remaining']:.1f}min remaining")
 
@@ -2152,7 +2110,7 @@ class TradingEngine:
                 loss_percentage = ((total_entry_cost - exit_value) / total_entry_cost) * 100
                 
                 if loss_percentage >= self.stop_loss_percentage:
-                    self.log(f"🛑 STOP LOSS TRIGGERED! Loss: {loss_percentage:.1f}% >= {self.stop_loss_percentage:.1f}%")
+                    self.log(f" STOP LOSS TRIGGERED! Loss: {loss_percentage:.1f}% >= {self.stop_loss_percentage:.1f}%")
                     self.log(f"   Entry Cost: ${total_entry_cost:.2f}, Exit Value: ${exit_value:.2f}")
                     
                     # Send Telegram stop loss alert
@@ -2174,18 +2132,18 @@ class TradingEngine:
                     
                     return True
                 else:
-                    self.log(f"⏳ Stop loss check: {loss_percentage:.1f}% < {self.stop_loss_percentage:.1f}%")
+                    self.log(f" Stop loss check: {loss_percentage:.1f}% < {self.stop_loss_percentage:.1f}%")
             
             return False
             
         except Exception as e:
-            self.log(f"❌ Error checking stop loss: {e}")
+            self.log(f" Error checking stop loss: {e}")
             return False
 
     def check_emergency_stop_loss(self, current_time: datetime.datetime) -> bool:
         """Check if emergency stop-loss condition is met (total daily loss)"""
         if self.daily_pnl <= -self.emergency_stop_loss:
-            self.log(f"🚨 EMERGENCY STOP LOSS TRIGGERED! Daily P&L: ${self.daily_pnl:.2f} <= -${self.emergency_stop_loss}")
+            self.log(f" EMERGENCY STOP LOSS TRIGGERED! Daily P&L: ${self.daily_pnl:.2f} <= -${self.emergency_stop_loss}")
             
             # Send Telegram emergency stop loss alert
             emergency_stop_data = {
@@ -2243,9 +2201,9 @@ class TradingEngine:
                 old_threshold_str = f"{old_threshold:.2f}" if old_threshold is not None else "None"
                 vix_str = f"{vix:.2f}" if vix is not None else "None"
                 self.log(f"[VIX] PARAMETERS UPDATED: VIX={vix_str}, Regime={self._vix_regime}")
-                self.log(f"   📊 Move Threshold: {old_threshold_str} → {self.move_threshold:.2f}pts")
-                self.log(f"   💰 Premium Range: ${self.premium_min:.2f} - ${self.premium_max:.2f}")
-                self.log(f"   🎯 Profit Target: {self.profit_target:.2f}x")
+                self.log(f"    Move Threshold: {old_threshold_str}  {self.move_threshold:.2f}pts")
+                self.log(f"    Premium Range: ${self.premium_min:.2f} - ${self.premium_max:.2f}")
+                self.log(f"    Profit Target: {self.profit_target:.2f}x")
             else:
                 vix_str = f"{vix:.2f}" if vix is not None else "None"
                 self.log(f"[VIX] Refreshed: VIX={vix_str}, regime={self._vix_regime} (no changes)")

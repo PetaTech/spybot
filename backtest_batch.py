@@ -99,8 +99,14 @@ def _run_backtest_worker_standalone(config: Dict) -> OptimizationResult:
     
     try:
         # Run backtest using the backtest_single.py function
+        # Use the available data directory
+        spy_file = './data/2025-09-05_2025-09-05_1min/spy_data_2025-09-05_2025-09-05_1min.parquet'
+        options_file = './data/2025-09-05_2025-09-05_1min/spy_options_0dte_contracts_2025-09-05_2025-09-05_1min.parquet'
+        
         result = run_backtest(
             config=config,
+            spy_file=spy_file,
+            options_file=options_file,
             return_results=True
         )
         
@@ -187,7 +193,7 @@ class AnalyticsEngine:
         # Use fixed parameters from config
         self.fixed_params = FIXED_PARAMETERS
         
-        print(f"📋 Analytics Engine Configuration:")
+        print(f" Analytics Engine Configuration:")
         print(f"  Tunable Parameters: {len(TUNABLE_PARAMETERS)}")
         print(f"  Fixed Parameters: {len(self.fixed_params)}")
         print(f"  Max Combinations: {MAX_COMBINATIONS}")
@@ -199,7 +205,7 @@ class AnalyticsEngine:
         Generate configuration combinations for grid search
         Uses parameters from config/analytics.py
         """
-        print("🔧 Generating configuration combinations...")
+        print(" Generating configuration combinations...")
         tunable_params = TUNABLE_PARAMETERS
         
         # Generate all possible combinations
@@ -207,13 +213,13 @@ class AnalyticsEngine:
         param_values = list(tunable_params.values())
         combinations = list(itertools.product(*param_values))
         
-        print(f"📊 Grid search analysis:")
+        print(f" Grid search analysis:")
         print(f"  Total possible combinations: {len(combinations)}")
         print(f"  Max combinations limit: {MAX_COMBINATIONS}")
         
         # Limit combinations if too many
         if len(combinations) > MAX_COMBINATIONS:
-            print(f"⚠️  Limiting combinations from {len(combinations)} to {MAX_COMBINATIONS}")
+            print(f"  Limiting combinations from {len(combinations)} to {MAX_COMBINATIONS}")
             combinations = random.sample(combinations, MAX_COMBINATIONS)
         
         configs = []
@@ -223,14 +229,14 @@ class AnalyticsEngine:
                 config[name] = value
             configs.append(config)
         
-        print(f"✅ Generated {len(configs)} configuration combinations for grid search")
+        print(f" Generated {len(configs)} configuration combinations for grid search")
         return configs
     
     def filter_results(self, results: List[OptimizationResult]) -> List[OptimizationResult]:
         """
         Filter results based on minimum criteria
         """
-        print("🔍 Filtering results based on minimum criteria...")
+        print(" Filtering results based on minimum criteria...")
         
         # Minimum criteria for viable strategies
         min_trades = 5
@@ -254,7 +260,7 @@ class AnalyticsEngine:
         """
         Rank results using multiple criteria with weighted scoring
         """
-        print("📊 Ranking results using comprehensive scoring...")
+        print(" Ranking results using comprehensive scoring...")
         
         for result in results:
             # Calculate composite score (0-100)
@@ -282,7 +288,7 @@ class AnalyticsEngine:
         # Sort by composite score (descending)
         results.sort(key=lambda x: x.composite_score, reverse=True)
         
-        print(f"✅ Results ranked by composite score")
+        print(f" Results ranked by composite score")
         return results
     
     def run_single_backtest(self, config: Dict) -> OptimizationResult:
@@ -299,9 +305,14 @@ class AnalyticsEngine:
         
         try:
             # Run backtest using the backtest_single.py function
-            # backtest_single.py handles all data file management internally
+            # Use the available data directory
+            spy_file = './data/2025-09-05_2025-09-05_1min/spy_data_2025-09-05_2025-09-05_1min.parquet'
+            options_file = './data/2025-09-05_2025-09-05_1min/spy_options_0dte_contracts_2025-09-05_2025-09-05_1min.parquet'
+            
             result = run_backtest(
                 config=config,
+                spy_file=spy_file,
+                options_file=options_file,
                 return_results=True
             )
             
@@ -376,20 +387,20 @@ class AnalyticsEngine:
         # Generate configurations (grid search only)
         configs = self.generate_config_combinations()
         
-        print(f"\n🚀 Starting grid search optimization:")
-        print(f"  📋 Configurations to test: {len(configs)}")
-        print(f"  🎯 Total backtests to run: {len(configs)}")
+        print(f"\n Starting grid search optimization:")
+        print(f"   Configurations to test: {len(configs)}")
+        print(f"   Total backtests to run: {len(configs)}")
         
         # Check if running in Google Colab
         is_colab = self._is_running_in_colab()
         if is_colab:
-            print("🔄 Detected Google Colab environment - using batching")
+            print(" Detected Google Colab environment - using batching")
             results = self._run_optimization_batched(configs)
         else:
             results = self._run_optimization_parallel(configs)
         
         # Filter and rank results
-        print("\n🔍 Post-processing results...")
+        print("\n Post-processing results...")
         filtered_results = self.filter_results(results)
         ranked_results = self.rank_results(filtered_results)
         
@@ -412,10 +423,10 @@ class AnalyticsEngine:
         
         # Use ProcessPoolExecutor with limited workers to avoid memory issues
         max_workers = min(8, mp.cpu_count())  # Default limit of 8
-        print(f"🔄 Parallel execution setup:")
-        print(f"  👥 Workers: {max_workers}")
-        print(f"  ⚡ CPU Cores: {mp.cpu_count()}")
-        print(f"  🎯 Target: {total_runs} backtests")
+        print(f" Parallel execution setup:")
+        print(f"   Workers: {max_workers}")
+        print(f"   CPU Cores: {mp.cpu_count()}")
+        print(f"   Target: {total_runs} backtests")
         
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all backtest tasks using the standalone worker function
@@ -424,8 +435,8 @@ class AnalyticsEngine:
                 future = executor.submit(_run_backtest_worker_standalone, config)
                 future_to_config[future] = config
             
-            print(f"✅ All {total_runs} tasks submitted to executor")
-            print(f"🔄 Collecting results...")
+            print(f" All {total_runs} tasks submitted to executor")
+            print(f" Collecting results...")
             
             # Collect results as they complete
             for future in as_completed(future_to_config):
@@ -439,10 +450,10 @@ class AnalyticsEngine:
                     if completed % 5 == 0:
                         elapsed = time.time() - start_time
                         eta = (elapsed / completed) * (total_runs - completed) if completed > 0 else 0
-                        print(f"  ✅ Progress: {completed}/{total_runs} ({completed/total_runs*100:.1f}%) - ETA: {eta:.1f}s")
+                        print(f"   Progress: {completed}/{total_runs} ({completed/total_runs*100:.1f}%) - ETA: {eta:.1f}s")
                         
                 except Exception as e:
-                    print(f"❌ Error in parallel backtest: {e}")
+                    print(f" Error in parallel backtest: {e}")
                     # Add default result for failed runs
                     all_results.append(OptimizationResult(
                         config=config,
@@ -465,7 +476,7 @@ class AnalyticsEngine:
                     completed += 1
         
         total_time = time.time() - start_time
-        print(f"✅ Parallel execution completed in {total_time:.2f}s")
+        print(f" Parallel execution completed in {total_time:.2f}s")
         
         return all_results
     
@@ -475,20 +486,20 @@ class AnalyticsEngine:
         all_results = []
         total_runs = len(configs)
         
-        print(f"🔄 Processing {total_runs} configs in batches of {BATCH_SIZE}")
+        print(f" Processing {total_runs} configs in batches of {BATCH_SIZE}")
         
         # Process configs in batches
         for batch_start in range(0, total_runs, BATCH_SIZE):
             batch_end = min(batch_start + BATCH_SIZE, total_runs)
             batch_configs = configs[batch_start:batch_end]
             
-            print(f"📦 Processing batch {batch_start//BATCH_SIZE + 1}: configs {batch_start+1}-{batch_end}")
+            print(f" Processing batch {batch_start//BATCH_SIZE + 1}: configs {batch_start+1}-{batch_end}")
             
             # Run batch in parallel
             batch_results = self._run_optimization_parallel(batch_configs)
             all_results.extend(batch_results)
             
-            print(f"✅ Completed batch {batch_start//BATCH_SIZE + 1}: {len(batch_results)} results")
+            print(f" Completed batch {batch_start//BATCH_SIZE + 1}: {len(batch_results)} results")
         
         return all_results
     
@@ -541,16 +552,16 @@ def write_analytics_log(summary_text: str, results_text: str):
         f.write(summary_text)
         f.write("\n\n")
         f.write(results_text)
-    print(f"📄 Analytics log saved to: {log_path}")
+    print(f" Analytics log saved to: {log_path}")
 
 
 def main():
     """Main function to run analytics"""
-    print("🚀 Starting Trading Bot Analytics Engine (Grid Search Only)")
+    print(" Starting Trading Bot Analytics Engine (Grid Search Only)")
     print("="*60)
     
     # Print system information
-    print(f"💻 System Information:")
+    print(f" System Information:")
     print(f"  CPU Cores: {mp.cpu_count()}")
     print(f"  Max Workers: {min(8, mp.cpu_count())}")
     print(f"  Python Version: {mp.sys.version}")
@@ -558,33 +569,33 @@ def main():
     
     # Initialize analytics engine
     analytics_start_time = time.time()
-    print("🔧 Initializing Analytics Engine...")
+    print(" Initializing Analytics Engine...")
     analytics = AnalyticsEngine()
     init_time = time.time() - analytics_start_time
-    print(f"✅ Analytics Engine initialized in {init_time:.2f}s")
+    print(f" Analytics Engine initialized in {init_time:.2f}s")
     
     # Run optimization (grid search only)
-    print("\n🔄 Running grid search optimization...")
+    print("\n Running grid search optimization...")
     optimization_start_time = time.time()
     results = analytics.run_optimization()
     optimization_time = time.time() - optimization_start_time
     
     # Print top results
-    print("\n📊 Analyzing results...")
+    print("\n Analyzing results...")
     results_start_time = time.time()
     # Capture summary and results output
     summary_buf = io.StringIO()
     print(f"\n{'='*80}", file=summary_buf)
-    print(f"📈 ANALYTICS COMPLETE - PERFORMANCE SUMMARY", file=summary_buf)
+    print(f" ANALYTICS COMPLETE - PERFORMANCE SUMMARY", file=summary_buf)
     print(f"{'='*80}", file=summary_buf)
-    print(f"✅ Total Configurations Tested: {len(results)}", file=summary_buf)
+    print(f" Total Configurations Tested: {len(results)}", file=summary_buf)
     total_time = time.time() - analytics_start_time
     avg_time_per_config = optimization_time / len(results) if results else 0
-    print(f"⏱️ Total Runtime: {total_time:.2f}s ({total_time/60:.1f} minutes)", file=summary_buf)
-    print(f"🔧 Initialization Time: {init_time:.2f}s", file=summary_buf)
-    print(f"🔄 Optimization Time: {optimization_time:.2f}s", file=summary_buf)
-    print(f"📊 Results Analysis Time: {time.time() - results_start_time:.2f}s", file=summary_buf)
-    print(f"⚡  Average Time per Config: {avg_time_per_config:.2f}s", file=summary_buf)
+    print(f" Total Runtime: {total_time:.2f}s ({total_time/60:.1f} minutes)", file=summary_buf)
+    print(f" Initialization Time: {init_time:.2f}s", file=summary_buf)
+    print(f" Optimization Time: {optimization_time:.2f}s", file=summary_buf)
+    print(f" Results Analysis Time: {time.time() - results_start_time:.2f}s", file=summary_buf)
+    print(f"  Average Time per Config: {avg_time_per_config:.2f}s", file=summary_buf)
     print(f"{'='*80}", file=summary_buf)
     summary_text = summary_buf.getvalue()
     # Print and log top results

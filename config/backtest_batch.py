@@ -5,7 +5,7 @@ Fine-tune parameters for strategy optimization
 
 # === Optimization Settings ===
 SEARCH_TYPE = "grid"  # Only grid search mode
-MAX_COMBINATIONS = 10000  # Reduced for focused testing of most impactful parameters
+MAX_COMBINATIONS = 5  # Very small for quick testing
 SAVE_RESULTS = True
 TOP_N_RESULTS = 10  # Show top 10 results
 

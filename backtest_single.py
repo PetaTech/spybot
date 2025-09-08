@@ -137,7 +137,6 @@ def create_config() -> dict:
         # Static VIX config
         'STATIC_VIX_MODE': STATIC_VIX_MODE,
         'STATIC_VIX_VALUE': STATIC_VIX_VALUE,
-        'OPT_PATH': OPT_PATH,
         'POLYGON_API_KEY': POLYGON_API_KEY,
     }
 
@@ -162,14 +161,22 @@ def run_backtest(config: dict = None, spy_file: str = None, options_file: str = 
     if config is None:
         config = create_config()
     
-    # Use provided files or get from config
+    # Use provided files or get from config (fallback to None if not provided)
     if spy_file is None:
-        spy_file = config.get('SPY_PATH', SPY_PATH)
+        spy_file = config.get('SPY_PATH')
     if options_file is None:
-        options_file = config.get('OPT_PATH', OPT_PATH)
+        options_file = config.get('OPT_PATH')
+    
+    # Validate that files are provided
+    if spy_file is None or options_file is None:
+        raise ValueError("SPY and options file paths must be provided either via arguments or config")
     
     print(f"[DEBUG] SPY file path: {spy_file}")
     print(f"[DEBUG] Options file path: {options_file}")
+    
+    # Update config with the actual file paths being used
+    config['SPY_PATH'] = spy_file
+    config['OPT_PATH'] = options_file
     
     # Create data provider
     data_provider = BacktestDataProvider(spy_file, options_file)
@@ -316,8 +323,8 @@ def validate_data_files(file_paths: dict) -> None:
     if not os.path.exists(options_path):
         raise FileNotFoundError(f"Options data file not found: {options_path}")
     
-    print(f"✅ Found SPY data file: {spy_path}")
-    print(f"✅ Found Options data file: {options_path}")
+    print(f"Found SPY data file: {spy_path}")
+    print(f"Found Options data file: {options_path}")
 
 
 def main():
@@ -326,15 +333,15 @@ def main():
     # Check command line arguments
     if len(sys.argv) == 1:
         # No arguments provided - use config defaults
-        print("⚠️  No data directory specified. Using config defaults...")
-        print("💡 Usage: python backtest_single.py <data_directory>")
-        print("💡 Example: python backtest_single.py 2025-09-03_2025-09-04_15min")
-        print("📁 Using config files for SPY and options paths")
+        print("WARNING: No data directory specified. Using config defaults...")
+        print("USAGE: python backtest_single.py <data_directory>")
+        print("EXAMPLE: python backtest_single.py 2025-09-03_2025-09-04_15min")
+        print("Using config files for SPY and options paths")
         run_backtest()
         return
     
     if len(sys.argv) != 2:
-        print("❌ Error: Invalid number of arguments")
+        print("ERROR: Invalid number of arguments")
         print("Usage: python backtest_single.py <data_directory>")
         print("Example: python backtest_single.py 2025-09-03_2025-09-04_15min")
         print("")
@@ -349,32 +356,32 @@ def main():
     
     try:
         # Parse and validate directory name
-        print(f"📁 Parsing data directory: {directory_name}")
+        print(f"Parsing data directory: {directory_name}")
         file_paths = parse_data_directory(directory_name)
         
-        print(f"📅 Date range: {file_paths['start_date']} to {file_paths['end_date']}")
-        print(f"⏱️  Interval: {file_paths['interval']}")
-        print(f"🎯 Data directory: {file_paths['directory']}")
+        print(f"Date range: {file_paths['start_date']} to {file_paths['end_date']}")
+        print(f"Interval: {file_paths['interval']}")
+        print(f"Data directory: {file_paths['directory']}")
         
         # Validate that files exist
         validate_data_files(file_paths)
         
         # Run backtest with the specified files
-        print(f"🚀 Starting backtest with data from {directory_name}")
+        print(f"Starting backtest with data from {directory_name}")
         run_backtest(
             spy_file=file_paths['spy_path'],
             options_file=file_paths['options_path']
         )
         
     except ValueError as e:
-        print(f"❌ Directory format error: {e}")
+        print(f"ERROR - Directory format error: {e}")
         sys.exit(1)
     except FileNotFoundError as e:
-        print(f"❌ File not found: {e}")
-        print("💡 Make sure you have downloaded the data using download_polygon.py first")
+        print(f"ERROR - File not found: {e}")
+        print("HINT: Make sure you have downloaded the data using download_polygon.py first")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"ERROR: {e}")
         sys.exit(1)
 
 
