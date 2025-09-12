@@ -115,8 +115,6 @@ STOP_LOSS_PERCENTAGE = 12.0         # 12% stop loss
 
 # Option Parameters
 OPTION_TARGET_MULTIPLIER = 2.35     # Exit at 2.35x entry price
-OPTION_ASK_MIN = 0.5                # Minimum $0.50 ask price
-OPTION_ASK_MAX = 347.33             # Maximum $347.33 ask price
 OPTION_BID_ASK_RATIO = 0.5          # Minimum bid/ask ratio
 
 # Market Timing
@@ -173,8 +171,6 @@ TUNABLE_PARAMETERS = {
     'OPTION_TARGET_MULTIPLIER': [2.35],
     'MIN_PROFIT_PERCENTAGE': [30.0],
     'STOP_LOSS_PERCENTAGE': [12.0],
-    'OPTION_ASK_MIN': [0.5],
-    'OPTION_ASK_MAX': [300.0],
     'OPTION_BID_ASK_RATIO': [0.5],
     'MAX_DAILY_TRADES': [5],
     'MAX_DAILY_LOSS': [1000],

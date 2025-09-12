@@ -76,8 +76,6 @@ def create_config() -> dict:
         'RETRY_DELAY': RETRY_DELAY,
         'PRICE_WINDOW_SECONDS': PRICE_WINDOW_SECONDS,
         'MAX_ENTRY_TIME': datetime.datetime.strptime(MAX_ENTRY_TIME, '%H:%M').time(),
-        'OPTION_ASK_MIN': OPTION_ASK_MIN,
-        'OPTION_ASK_MAX': OPTION_ASK_MAX,
         'OPTION_BID_ASK_RATIO': OPTION_BID_ASK_RATIO,
         'MAX_DAILY_TRADES': MAX_DAILY_TRADES,
         'MAX_DAILY_LOSS': MAX_DAILY_LOSS,

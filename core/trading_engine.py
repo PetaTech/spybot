@@ -309,8 +309,6 @@ class TradingEngine:
         self.slippage = config.get('SLIPPAGE', 0.01)
         
         # Option filtering parameters
-        self.option_ask_min = config.get('OPTION_ASK_MIN', 0.01)
-        self.option_ask_max = config.get('OPTION_ASK_MAX', 100.0)
         self.option_bid_ask_ratio = config.get('OPTION_BID_ASK_RATIO', 0.5)
         
         # Daily limits
@@ -679,8 +677,13 @@ class TradingEngine:
                     result['error'] = 'No expiration date stored'
                     self.log(f" EXIT FAILED: {result['error']}")
         
-        # Only check for new entry signals if NOT in buffer periods
-        if not in_open_buffer and not in_close_buffer:
+        # Check if we're past max entry time (no signals after this time)
+        past_max_entry_time = market_row.current_time.time() > self.max_entry_time
+        if past_max_entry_time:
+            self.log(f" NO SIGNALS: Current time {market_row.current_time.time()} > {self.max_entry_time} (MAX_ENTRY_TIME)")
+
+        # Only check for new entry signals if NOT in buffer periods and before max entry time
+        if not in_open_buffer and not in_close_buffer and not past_max_entry_time:
             print(f"[ENGINE DEBUG] Checking for entry signals...")
             if self.should_detect_signal(market_row.current_time):
                 result['signal_detected'] = True
@@ -772,13 +775,20 @@ class TradingEngine:
             else:
                 self.log(f"    No signal detected (move: {move_percent:.2f}%, threshold: {self.move_threshold:.2f}pts)")
         else:
-            # In buffer period - skip entry but log the reason
+            # In buffer period or past max entry time - skip signals but log the reason
             if in_open_buffer:
                 result['action'] = 'skipped'
                 result['error'] = f'Market open buffer: {time_since_open:.1f}min < {self.market_open_buffer_minutes}min'
             elif in_close_buffer:
                 result['action'] = 'skipped'
                 result['error'] = f'Market close buffer: {time_until_close:.1f}min < {self.market_close_buffer_minutes}min'
+            elif past_max_entry_time:
+                result['action'] = 'skipped'
+                result['error'] = f'Past max entry time: {market_row.current_time.time()} > {self.max_entry_time}'
+                # Don't log this every tick to avoid spam - only log periodically
+                if not hasattr(self, '_last_max_entry_log') or (market_row.current_time - self._last_max_entry_log).total_seconds() > 300:  # Log every 5 minutes
+                    self.log(f" SIGNALS BLOCKED: {result['error']}")
+                    self._last_max_entry_log = market_row.current_time
         
         # Log overall performance periodically (every 5 trades or when significant events occur)
         if self.total_trades % 5 == 0 and self.total_trades > 0:
@@ -1231,11 +1241,26 @@ class TradingEngine:
                         
                         self.log(f"[SYNTHETIC] {ticker} price=${option_price:.2f} (intrinsic=${intrinsic_value:.2f}, time=${time_value:.2f})")
                         
+                        bid_price = option_price * 0.95  # 5% bid-ask spread
+                        ask_price = option_price * 1.05
+                        
+                        # Apply VIX-based premium filtering (same as live/paper)
+                        if not (self.premium_min <= ask_price <= self.premium_max):
+                            self.log(f"[FILTER] {ticker} ask=${ask_price:.2f} outside premium range ${self.premium_min:.2f}-${self.premium_max:.2f}")
+                            continue
+                        
+                        # Apply bid-ask ratio filtering (same as live/paper)
+                        if ask_price <= bid_price * self.option_bid_ask_ratio:
+                            self.log(f"[FILTER] {ticker} poor bid-ask ratio: ask=${ask_price:.2f} <= bid=${bid_price:.2f} * {self.option_bid_ask_ratio}")
+                            continue
+                        
+                        self.log(f"[FILTER] {ticker} passed all filters: ask=${ask_price:.2f}, bid=${bid_price:.2f}")
+                        
                         pos = {
                             'option_type': option_type,
                             'strike': strike,
-                            'bid': option_price * 0.95,  # 5% bid-ask spread
-                            'ask': option_price * 1.05,
+                            'bid': bid_price,
+                            'ask': ask_price,
                             'expiration_date': expiration,
                             'ticker': ticker,
                             'contract_type': contract_type
