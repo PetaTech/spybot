@@ -34,6 +34,10 @@ EARLY_SIGNAL_COOLDOWN_MINUTES = 30  # Cooldown period if signal occurs before op
 # === VIX-Based Volatility Strategy Parameters ===
 VIX_THRESHOLD = 25  # VIX value to distinguish high vs low volatility
 
+# === VIX Data Source Configuration ===
+STATIC_VIX_MODE = True  # If True, use STATIC_VIX_VALUE instead of fetching from Yahoo
+STATIC_VIX_VALUE = 20.0  # Static VIX value to use when STATIC_VIX_MODE is enabled
+
 # High Volatility Parameters
 HIGH_VOL_MOVE_THRESHOLD = 3.5  # SPY price move threshold for high volatility
 HIGH_VOL_PREMIUM_MIN = 1.05    # Min option premium for high volatility

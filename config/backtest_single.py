@@ -16,10 +16,6 @@ SLIPPAGE = 0.01  # 1 cent slippage per option
 MAX_RETRIES = 6  # Same as live/paper modes
 RETRY_DELAY = 0  # No delay for faster backtesting (overrides strategy.py)
 
-# === VIX Static Mode for Backtest ===
-STATIC_VIX_MODE = False  # If True, use STATIC_VIX_VALUE for VIX in backtest
-STATIC_VIX_VALUE = 20.0  # Static VIX value to use when STATIC_VIX_MODE is enabled
-
 # === Logging ===
 LOG_LEVEL = 'INFO'
 LOG_DIR = 'logs' 

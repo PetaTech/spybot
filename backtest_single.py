@@ -132,9 +132,6 @@ def create_config() -> dict:
         'EARLY_SIGNAL_COOLDOWN_MINUTES': EARLY_SIGNAL_COOLDOWN_MINUTES,
         'LOG_DIR': 'logs',
         'MODE': 'backtest',
-        # Static VIX config
-        'STATIC_VIX_MODE': STATIC_VIX_MODE,
-        'STATIC_VIX_VALUE': STATIC_VIX_VALUE,
         'POLYGON_API_KEY': POLYGON_API_KEY,
     }
 

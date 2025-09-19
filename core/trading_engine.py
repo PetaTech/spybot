@@ -2190,10 +2190,10 @@ class TradingEngine:
     def _set_vix_parameters(self, force=False, target_datetime=None):
         now = time.time()
         if force or (now - self._vix_last_fetch_time > 300):  # 5 min cache
-            # Use static VIX for backtesting if enabled
-            if self.mode == "backtest" and getattr(self, 'config', None) and self.config.get('STATIC_VIX_MODE', False):
+            # Use static VIX if enabled (works for all modes: live, paper, backtest)
+            if getattr(self, 'config', None) and self.config.get('STATIC_VIX_MODE', False):
                 vix = self.config.get('STATIC_VIX_VALUE', 20.0)
-                self.log(f"[VIX] Backtest mode: Using STATIC VIX value {vix}")
+                self.log(f"[VIX] Using STATIC VIX value {vix} (mode: {self.mode})")
             # Use historical VIX for backtesting, current VIX for live/paper
             elif self.mode == "backtest" and target_datetime:
                 vix = fetch_vix_at_datetime(target_datetime)
