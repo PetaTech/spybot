@@ -68,6 +68,39 @@ class MultiAccountTelegramManager:
             enhanced_signal_data = signal_data.copy()
             enhanced_signal_data['account_name'] = account_name
 
+            # Backward-compat mapping: ensure required fields exist for TelegramNotifier
+            # detection_time
+            if 'detection_time' not in enhanced_signal_data:
+                enhanced_signal_data['detection_time'] = enhanced_signal_data.get('timestamp', datetime.datetime.now())
+            # market_price
+            if 'market_price' not in enhanced_signal_data and 'price' in enhanced_signal_data:
+                enhanced_signal_data['market_price'] = enhanced_signal_data['price']
+            # move_points (optional)
+            if 'move_points' not in enhanced_signal_data and 'move_percent' in enhanced_signal_data and 'market_price' in enhanced_signal_data:
+                # Fallback: cannot compute exact points without window ref; set to 0.0 if missing
+                enhanced_signal_data['move_points'] = enhanced_signal_data.get('move_points', 0.0)
+            # condition text
+            if 'condition' not in enhanced_signal_data:
+                mp = enhanced_signal_data.get('move_percent', 0.0)
+                enhanced_signal_data['condition'] = f"Move {mp:.2f}% in window, signal detected"
+            # active_trades
+            if 'active_trades' not in enhanced_signal_data and 'trades_active' in enhanced_signal_data:
+                enhanced_signal_data['active_trades'] = enhanced_signal_data['trades_active']
+            # symbol
+            if 'symbol' not in enhanced_signal_data and 'account_symbol' in enhanced_signal_data:
+                enhanced_signal_data['symbol'] = enhanced_signal_data['account_symbol']
+            if 'symbol' not in enhanced_signal_data:
+                enhanced_signal_data['symbol'] = 'SPY'
+            # vix fields: prefer engine-provided values on the result
+            if 'vix_regime' not in enhanced_signal_data and 'vix_regime' in signal_data:
+                enhanced_signal_data['vix_regime'] = signal_data.get('vix_regime', 'Unknown')
+            if 'vix_value' not in enhanced_signal_data and 'vix_value' in signal_data:
+                enhanced_signal_data['vix_value'] = signal_data.get('vix_value', None)
+            if 'vix_regime' not in enhanced_signal_data:
+                enhanced_signal_data['vix_regime'] = 'Unknown'
+            if 'vix_value' not in enhanced_signal_data:
+                enhanced_signal_data['vix_value'] = None
+
             success = notifier.send_signal_alert(enhanced_signal_data)
             if success:
                 self.notification_counts[account_name] += 1
@@ -88,9 +121,61 @@ class MultiAccountTelegramManager:
             enhanced_entry_data = entry_data.copy()
             enhanced_entry_data['account_name'] = account_name
 
+            # Backfill required fields with safe defaults
+            import datetime as _dt
+            if 'entry_time' not in enhanced_entry_data or not isinstance(enhanced_entry_data.get('entry_time'), _dt.datetime):
+                enhanced_entry_data['entry_time'] = _dt.datetime.now()
+            if 'trade_id' not in enhanced_entry_data:
+                enhanced_entry_data['trade_id'] = 0
+            if 'market_price' not in enhanced_entry_data and 'price' in enhanced_entry_data:
+                enhanced_entry_data['market_price'] = enhanced_entry_data['price']
+            if 'total_risk' not in enhanced_entry_data:
+                enhanced_entry_data['total_risk'] = 0
+            if 'risk_per_side' not in enhanced_entry_data:
+                enhanced_entry_data['risk_per_side'] = 0
+            if 'entry_cost' not in enhanced_entry_data:
+                enhanced_entry_data['entry_cost'] = 0.0
+            if 'commission' not in enhanced_entry_data and 'entry_commission' in enhanced_entry_data:
+                enhanced_entry_data['commission'] = enhanced_entry_data['entry_commission']
+            if 'commission' not in enhanced_entry_data:
+                enhanced_entry_data['commission'] = 0.0
+            if 'total_entry_cost' not in enhanced_entry_data:
+                enhanced_entry_data['total_entry_cost'] = enhanced_entry_data.get('entry_cost', 0.0) + enhanced_entry_data.get('commission', 0.0)
+            if 'expiration_date' not in enhanced_entry_data:
+                enhanced_entry_data['expiration_date'] = ''
+            if 'trades_active' not in enhanced_entry_data and 'active_trades' in enhanced_entry_data:
+                enhanced_entry_data['trades_active'] = enhanced_entry_data['active_trades']
+            if 'trades_active' not in enhanced_entry_data:
+                enhanced_entry_data['trades_active'] = 0
+            if 'symbol' not in enhanced_entry_data:
+                enhanced_entry_data['symbol'] = 'SPY'
+            if 'limit_orders_info' not in enhanced_entry_data:
+                enhanced_entry_data['limit_orders_info'] = 'Limit orders placed for profit targets'
+
+            # Normalize positions: prefer entry_positions; convert objects to dicts if needed
+            positions_source = enhanced_entry_data.get('entry_positions') or enhanced_entry_data.get('positions') or []
+            normalized_positions = []
+            for p in positions_source:
+                if isinstance(p, dict):
+                    normalized_positions.append(p)
+                else:
+                    try:
+                        normalized_positions.append({
+                            'type': getattr(p, 'type', '?'),
+                            'symbol': getattr(p, 'symbol', 'SPY'),
+                            'strike': getattr(p, 'strike', 0),
+                            'expiration': getattr(p, 'expiration_date', ''),
+                            'entry_price': getattr(p, 'entry_price', 0.0),
+                            'contracts': getattr(p, 'contracts', 0)
+                        })
+                    except Exception:
+                        continue
+            enhanced_entry_data['positions'] = normalized_positions
             success = notifier.send_entry_alert(enhanced_entry_data)
             if success:
                 self.notification_counts[account_name] += 1
+            else:
+                print(f"❌ Entry alert send returned False for {account_name}")
             return success
 
         except Exception as e:
@@ -211,6 +296,39 @@ class MultiAccountTelegramManager:
 
         except Exception as e:
             print(f"❌ Failed to send daily summary for {account_name}: {e}")
+            return False
+
+    def send_shutdown_alert(self, account_name: str, final_data: Dict) -> bool:
+        """Send shutdown/stop alert for specific account"""
+        print(f"[DEBUG] Looking for notifier for account: '{account_name}'")
+        print(f"[DEBUG] Available notifiers: {list(self.account_notifiers.keys())}")
+
+        notifier = self.account_notifiers.get(account_name)
+        if not notifier:
+            print(f"[DEBUG] No notifier found for '{account_name}'")
+            return False
+
+        try:
+            # Use the existing system status alert method
+            status_data = {
+                'status': 'stopped',
+                'timestamp': final_data.get('timestamp', datetime.datetime.now()),
+                'mode': final_data.get('mode', 'unknown'),
+                'market_status': 'CLOSED',
+                'final_pnl': final_data.get('total_pnl', 0),
+                'total_trades': final_data.get('total_trades', 0),
+                'account_name': account_name
+            }
+
+            print(f"[DEBUG] Attempting to send shutdown alert with data: {status_data}")
+            success = notifier.send_system_status_alert(status_data)
+            print(f"[DEBUG] Telegram send result: {success}")
+            if success:
+                self.notification_counts[account_name] += 1
+            return success
+
+        except Exception as e:
+            print(f"❌ Failed to send shutdown alert for {account_name}: {e}")
             return False
 
     def broadcast_message(self, message: str, exclude_accounts: List[str] = None) -> Dict[str, bool]:

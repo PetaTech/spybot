@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Callable
 from queue import Queue, Empty
 from dateutil import tz
 from dataclasses import dataclass
-from utils.tradier_api import set_api_credentials, get_spy_ohlc, test_connection
+from utils.tradier_api import set_api_credentials, get_spy_ohlc, test_connection, get_option_chain
 
 @dataclass
 class MarketData:
@@ -126,6 +126,9 @@ class SharedDataProvider:
 
     def stop(self):
         """Stop the shared data provider"""
+        # Idempotent stop to avoid duplicate logs
+        if not getattr(self, 'running', False):
+            return
         print("🛑 Stopping SharedDataProvider...")
         self.running = False
 
@@ -258,3 +261,21 @@ class SharedDataProvider:
                 return False
 
         return True
+
+    # === Options Chain Access ===
+    def get_option_chain(self, symbol: str, expiration: str, current_time: datetime.datetime):
+        """Fetch option chain for given symbol/expiration using Tradier API.
+
+        Note: Delegates to utils.tradier_api which uses the credentials set for this data source.
+        """
+        try:
+            import pandas as pd  # ensure DataFrame type is available to callers
+            return get_option_chain(symbol, expiration)
+        except Exception as e:
+            print(f"❌ SharedDataProvider.get_option_chain error: {e}")
+            # Return empty DataFrame on failure to keep engine logic robust
+            try:
+                import pandas as pd
+                return pd.DataFrame()
+            except Exception:
+                return []

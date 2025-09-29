@@ -179,7 +179,7 @@ def run_backtest(config: dict = None, spy_file: str = None, options_file: str = 
     print(f"[DEBUG] Config created, MAX_RETRIES: {config.get('MAX_RETRIES', 'N/A')}")
     
     # Create trading engine
-    trading_engine = TradingEngine(config, data_provider, mode="backtest")
+    trading_engine = TradingEngine(config, data_provider, mode="backtest", telegram_config=None)
     
     # Process all data rows
     try:

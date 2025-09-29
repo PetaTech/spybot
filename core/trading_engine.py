@@ -258,11 +258,12 @@ class TradingEngine:
     Maintains all trading state and logic internally.
     """
     
-    def __init__(self, config: Dict, data_provider: DataProvider, mode: str = "backtest", 
-                 api_url: str = None, access_token: str = None, account_id: str = None):
+    def __init__(self, config: Dict, data_provider: DataProvider, mode: str = "backtest",
+                 api_url: str = None, access_token: str = None, account_id: str = None,
+                 telegram_config: Dict = None):
         """
         Initialize trading engine with configuration and dependencies
-        
+
         Args:
             config: Dictionary containing strategy parameters
             data_provider: Provider for options data
@@ -270,10 +271,12 @@ class TradingEngine:
             api_url: API URL for live/paper trading
             access_token: API access token for live/paper trading
             account_id: Account ID for live/paper trading
+            telegram_config: Telegram configuration dictionary from accounts config
         """
         # Dependencies
         self.data_provider = data_provider
         self.config = config # Store config for backtest mode
+        self.telegram_config = telegram_config # Store telegram config from accounts
         
         # Create appropriate order executor based on mode
         if mode == "backtest":
@@ -393,55 +396,48 @@ class TradingEngine:
     
     def _init_telegram_notifications(self):
         """Initialize Telegram notifications if enabled"""
+        # In multi-account mode, telegram is handled by MultiAccountTelegramManager
+        # Individual TradingEngine should not have its own telegram
+        if self.mode in ['live', 'paper']:
+            return
+
+        # Only initialize for backtest mode if config is provided
         try:
-            from config.telegram import (
-                TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ENABLED,
-                SEND_SIGNAL_ALERTS, SEND_ENTRY_ALERTS, SEND_EXIT_ALERTS,
-                SEND_LIMIT_HIT_ALERTS, SEND_STOP_LOSS_ALERTS, 
-                SEND_DAILY_LIMIT_ALERTS, SEND_SYSTEM_ALERTS
-            )
-            from utils.telegram_bot import TelegramNotifier, TelegramConfig
-            
-            if TELEGRAM_ENABLED and TELEGRAM_BOT_TOKEN != "YOUR_BOT_TOKEN_HERE":
-                # Get account holder name
-                if self.mode in ['live', 'paper']:
-                    try:
-                        from utils.tradier_api import get_account_profile
-                        profile = get_account_profile()
-                        self.account_holder_name = profile['name']
-                    except Exception as e:
-                        self.log(f"[TELEGRAM] Could not fetch account name: {e}")
-                
-                # Initialize Telegram notifier
-                config = TelegramConfig(
-                    bot_token=TELEGRAM_BOT_TOKEN,
-                    chat_id=TELEGRAM_CHAT_ID,
-                    enabled=TELEGRAM_ENABLED
-                )
-                
-                self.telegram_notifier = TelegramNotifier(config, self.account_holder_name)
-                
-                # Store notification preferences
-                self.telegram_settings = {
-                    'signal_alerts': SEND_SIGNAL_ALERTS,
-                    'entry_alerts': SEND_ENTRY_ALERTS, 
-                    'exit_alerts': SEND_EXIT_ALERTS,
-                    'limit_hit_alerts': SEND_LIMIT_HIT_ALERTS,
-                    'stop_loss_alerts': SEND_STOP_LOSS_ALERTS,
-                    'daily_limit_alerts': SEND_DAILY_LIMIT_ALERTS,
-                    'system_alerts': SEND_SYSTEM_ALERTS
-                }
-                
-                self.log(f"[TELEGRAM] Initialized for account: {self.account_holder_name}")
-                
-                # Send system start alert
-                if self.telegram_settings['system_alerts']:
-                    self._send_system_start_alert()
-            else:
-                self.log("[TELEGRAM] Disabled or not configured")
-                
+            if self.telegram_config and self.telegram_config.get('enabled'):
+                from utils.telegram_bot import TelegramNotifier, TelegramConfig
+
+                bot_token = self.telegram_config.get('bot_token')
+                chat_id = self.telegram_config.get('chat_id')
+
+                if bot_token and bot_token != "YOUR_BOT_TOKEN_HERE" and chat_id:
+                    # Initialize Telegram notifier
+                    config = TelegramConfig(
+                        bot_token=bot_token,
+                        chat_id=chat_id,
+                        enabled=True
+                    )
+
+                    self.telegram_notifier = TelegramNotifier(config, self.account_holder_name)
+
+                    # Store notification preferences (all enabled by default for new system)
+                    self.telegram_settings = {
+                        'signal_alerts': True,
+                        'entry_alerts': True,
+                        'exit_alerts': True,
+                        'limit_hit_alerts': True,
+                        'stop_loss_alerts': True,
+                        'daily_limit_alerts': True,
+                        'system_alerts': True
+                    }
+
+                    self.log(f"[TELEGRAM] Initialized for backtest: {self.account_holder_name}")
+
+                    # Send system start alert
+                    if self.telegram_settings['system_alerts']:
+                        self._send_system_start_alert()
+
         except ImportError:
-            self.log("[TELEGRAM] Configuration not found, notifications disabled")
+            pass
         except Exception as e:
             self.log(f"[TELEGRAM] Initialization failed: {e}")
     
@@ -556,7 +552,11 @@ class TradingEngine:
         print(f"[ENGINE DEBUG] Move calculation: {move_percent:.2f}% ({absolute_move:.2f} points)")
         
         # Check limit order status first (every 3 seconds)
-        self.check_limit_order_fills(market_row.current_time)
+        # Check for limit order fills and handle any exits
+        limit_result = self.check_limit_order_fills(market_row.current_time)
+        if limit_result['action'] == 'exit':
+            result['action'] = 'exit'
+            result['exit_data'] = limit_result['exit_data']
         
         # ALWAYS check for exits on all active trades (even during buffer periods)
         if self.active_trades:
@@ -690,6 +690,19 @@ class TradingEngine:
                 self.total_signals += 1
                 self.log(f" SIGNAL DETECTED! {market_row.symbol} ${market_row.close:.2f} | Move: {move_percent:.2f}% | Active trades: {len(self.active_trades)}")
                 
+                # Ensure VIX is set before building signal payload (startup guard)
+                try:
+                    if not hasattr(self, '_vix_regime') or getattr(self, '_vix_regime', None) is None:
+                        self._set_vix_parameters(force=False, target_datetime=market_row.current_time)
+                except Exception:
+                    pass
+                # Expose VIX info in result for multi-account notifier layer
+                try:
+                    result['vix_regime'] = getattr(self, '_vix_regime', 'Unknown')
+                    result['vix_value'] = getattr(self, '_vix_value', None)
+                except Exception:
+                    result['vix_regime'] = 'Unknown'
+                    result['vix_value'] = None
                 # Send signal alert to Telegram
                 signal_data = {
                     'detection_time': market_row.current_time,
@@ -735,6 +748,37 @@ class TradingEngine:
                                 result['entry_cost'] = entry_cost
                                 result['entry_commission'] = entry_commission
                                 result['total_entry_cost'] = total_entry_cost
+                                # Enrich result for multi-account notifier payload mapping
+                                result['entry_time'] = market_row.current_time
+                                result['symbol'] = market_row.symbol
+                                result['price'] = market_row.close
+                                result['expiration_date'] = expiration
+                                # Additional fields required by TelegramNotifier.send_entry_alert
+                                trade_id_for_result = self.trade_id_counter
+                                if positions:
+                                    try:
+                                        trade_id_for_result = getattr(positions[0], 'trade_id', self.trade_id_counter)
+                                    except Exception:
+                                        trade_id_for_result = self.trade_id_counter
+                                result['trade_id'] = trade_id_for_result
+                                result['market_price'] = market_row.close
+                                result['total_risk'] = self.risk_per_side * 2  # Both sides
+                                result['risk_per_side'] = self.risk_per_side
+                                result['commission'] = entry_commission
+                                result['trades_active'] = len(self.active_trades)
+                                result['limit_orders_info'] = "Limit orders placed for profit targets"
+                                # Convert Position objects to dict format expected by TelegramNotifier
+                                result['entry_positions'] = [
+                                    {
+                                        'type': pos.type,
+                                        'symbol': pos.symbol,
+                                        'strike': pos.strike,
+                                        'expiration': pos.expiration_date,
+                                        'entry_price': pos.entry_price,
+                                        'contracts': pos.contracts
+                                    }
+                                    for pos in positions
+                                ]
                                 
                                 self.increment_daily_trades()
                                 self.log(f" TRADE ENTERED! Cost: ${total_entry_cost:.2f} (${entry_cost:.2f} + ${entry_commission:.2f} commission)")
@@ -1114,7 +1158,9 @@ class TradingEngine:
             print("[ENGINE DEBUG] No data provider available")
             return []
         positions = []
-        for attempt in range(1, self.max_retries + 1):
+        # Limit transient retries to at most 2 quick attempts for chain gaps
+        transient_retries = min(getattr(self, 'max_retries', 1), 2)
+        for attempt in range(1, transient_retries + 1):
             self.log(f"[Attempt {attempt}] Fetching option chain...")
             try:
                 if not current_time:
@@ -1125,37 +1171,109 @@ class TradingEngine:
                     continue
                 # Remove detailed debug: columns, sample, unique values
                 self.log(f"[DEBUG] Option chain loaded: {len(df_chain)} contracts")
-                self.log(f"[DEBUG] Premium range: ${self.premium_min:.2f}-${self.premium_max:.2f}, Bid/Ask ratio: {self.option_bid_ask_ratio}")
+                # Build dynamic target premium band by VIX regime (not too tight)
+                if getattr(self, '_vix_regime', 'low_volatility') == 'high_volatility':
+                    target_min, target_max = 1.00, 3.00
+                else:
+                    target_min, target_max = 0.40, 1.50
+                self.log(f"[DEBUG] Target premium band: ${target_min:.2f}-${target_max:.2f}")
+
                 for option_type, option_label in [('C', 'call'), ('P', 'put')]:
                     df_side = df_chain[df_chain['option_type'] == option_label].copy()
                     self.log(f"[DEBUG] {option_type} side: {len(df_side)} contracts before filtering")
                     if df_side.empty:
                         continue
+
+                    # Compute helper columns
                     df_side['dist'] = abs(df_side['strike'] - price)
-                    df_side = df_side.sort_values('dist')
-                    # Filter for valid options in VIX-based premium range
-                    valid = df_side[df_side['ask'].between(self.premium_min, self.premium_max)]
-                    if not valid.empty:
-                        valid = valid[valid['ask'] > valid['bid'] * self.option_bid_ask_ratio]
-                    self.log(f"[DEBUG] {option_type} side: {len(valid)} contracts after filtering")
-                    if valid.empty:
-                        self.log(f"[DEBUG] No valid {option_type} options after filtering. Available strikes and prices:")
-                        for _, row in df_side.iterrows():
-                            self.log(f"    Strike={row['strike']}, Bid={row['bid']}, Ask={row['ask']}")
+                    df_side['spread'] = (df_side['ask'] - df_side['bid']).clip(lower=0)
+                    # Tolerance expansion sequence per side
+                    found_row = None
+                    counts_log = []
+                    for tol in [0.00, 0.20, 0.40]:
+                        band_min = max(0.0, target_min - tol)
+                        band_max = target_max + tol
+                        in_band = df_side[(df_side['ask'] >= band_min) & (df_side['ask'] <= band_max)]
+                        c1 = len(in_band)
+                        if c1 == 0:
+                            counts_log.append((tol, 0, 0, 0, 0))
+                            continue
+                        # Liquidity gates
+                        liq = in_band[
+                            (in_band['ask'] > in_band['bid'] * self.option_bid_ask_ratio) &
+                            (in_band['bid'] > 0.05)
+                        ].copy()
+                        # Spread gate: spread <= max(25% of ask, $0.20)
+                        # Use boolean OR (pandas 2.x removed DataFrame.append)
+                        liq = liq[(liq['spread'] <= (liq['ask'] * 0.25)) | (liq['spread'] <= 0.20)]
+                        c2 = len(liq)
+                        if c2 == 0:
+                            counts_log.append((tol, c1, 0, 0, 0))
+                            continue
+                        # Optional volume/OI gates if present
+                        if 'volume' in liq.columns or 'open_interest' in liq.columns:
+                            vol_series = liq['volume'] if 'volume' in liq.columns else 0
+                            oi_series = liq['open_interest'] if 'open_interest' in liq.columns else 0
+                            liq = liq[(vol_series.fillna(0) >= 50) | (oi_series.fillna(0) >= 100)]
+                        c3 = len(liq)
+                        if c3 == 0:
+                            counts_log.append((tol, c1, c2, 0, 0))
+                            continue
+                        # Sort preference: ATM, smaller spread, higher volume/OI, larger size
+                        sort_cols = ['dist', 'spread']
+                        ascending = [True, True]
+                        if 'volume' in liq.columns:
+                            sort_cols.append('volume'); ascending.append(False)
+                        if 'open_interest' in liq.columns:
+                            sort_cols.append('open_interest'); ascending.append(False)
+                        if 'ask_size' in liq.columns:
+                            sort_cols.append('ask_size'); ascending.append(False)
+                        if 'bid_size' in liq.columns:
+                            sort_cols.append('bid_size'); ascending.append(False)
+                        liq = liq.sort_values(sort_cols, ascending=ascending)
+                        c4 = len(liq)
+                        row = liq.iloc[0]
+                        entry_price = float(row['ask'])
+                        # Contract sizing (min 1)
+                        contracts = int(self.risk_per_side // (entry_price * 100))
+                        if contracts < 1:
+                            # Try next candidate on this side
+                            picked = None
+                            for _idx in range(1, len(liq)):
+                                cand = liq.iloc[_idx]
+                                ep = float(cand['ask'])
+                                cts = int(self.risk_per_side // (ep * 100))
+                                if cts >= 1:
+                                    row = cand
+                                    entry_price = ep
+                                    contracts = cts
+                                    picked = row
+                                    break
+                            if picked is None:
+                                counts_log.append((tol, c1, c2, c3, 0))
+                                continue
+                        found_row = row
+                        counts_log.append((tol, c1, c2, c3, c4))
+                        break
+
+                    # Log counts for this side
+                    for tol, c1, c2, c3, c4 in counts_log:
+                        self.log(f"[DEBUG] {option_type} tol±${tol:.2f}: band={c1} liq={c2} vol/oi={c3} sorted={c4}")
+                    if found_row is None:
+                        self.log(f"[DEBUG] No valid {option_type} options after tolerance expansions")
                         continue
-                    for _, row in valid.iterrows():
-                        self.log(f"[DEBUG] {option_type} candidate: Strike={row['strike']}, Bid={row['bid']}, Ask={row['ask']}")
-                    row = valid.iloc[0]
-                    strike = row['strike']
-                    entry_price = row['ask']
+
+                    strike = float(found_row['strike'])
+                    entry_price = float(found_row['ask'])
                     contracts = int(self.risk_per_side // (entry_price * 100))
+                    contracts = max(1, contracts)
                     # Generate unique trade ID for this trade
-                    if len(positions) == 0:  # Only increment for the first position of a new trade
+                    if len(positions) == 0:
                         self.trade_id_counter += 1
                         current_trade_id = self.trade_id_counter
                     else:
-                        current_trade_id = self.trade_id_counter  # Use same ID for both positions
-                        
+                        current_trade_id = self.trade_id_counter
+
                     positions.append(Position(
                         type=option_type,
                         strike=strike,
@@ -1167,14 +1285,18 @@ class TradingEngine:
                         trade_id=current_trade_id
                     ))
                 if len(positions) == 2:
-                    self.log(f" Valid options found for both sides (premium range: ${self.premium_min:.2f}-${self.premium_max:.2f})")
+                    self.log(f" Valid options found for both sides (target band: ${target_min:.2f}-${target_max:.2f})")
                     break
                 else:
                     self.log(" Waiting for better option availability...")
             except Exception as e:
                 self.log(f"[ERROR] Failed to fetch option chain: {str(e)}")
-            if attempt < self.max_retries and self.retry_delay > 0:
-                time.sleep(self.retry_delay)
+            if attempt < transient_retries:
+                # Quick backoff for transient emptiness
+                try:
+                    time.sleep(0.25)
+                except Exception:
+                    pass
         return positions
     
     def find_valid_options_backtest(self, price: float, expiration: str, current_time: datetime.datetime) -> list:
@@ -1376,6 +1498,14 @@ class TradingEngine:
                 # Calculate limit sell price using VIX-based profit target
                 profit_multiplier = getattr(self, 'profit_target', 1.35)  # Default to 1.35 if not set
                 limit_price = round(pos.entry_price * profit_multiplier, 2)
+                # Safety guard: ensure limit price is a valid positive tick
+                try:
+                    if limit_price is None or float(limit_price) <= 0:
+                        base_price = pos.entry_price if getattr(pos, 'entry_price', 0) and pos.entry_price > 0 else 0.05
+                        limit_price = round(max(base_price * profit_multiplier, 0.05), 2)
+                except Exception:
+                    # Fallback to minimum tick if anything goes wrong
+                    limit_price = 0.05
                 pos.limit_price = limit_price
                 
                 # Place limit sell order immediately with retry logic
@@ -1516,7 +1646,7 @@ class TradingEngine:
             self.log(f" Error checking combined profit exit: {e}")
             return False
 
-    def check_limit_order_fills(self, current_time: datetime.datetime):
+    def check_limit_order_fills(self, current_time: datetime.datetime) -> Dict:
         """Check if any limit orders have been filled and handle automatic closure"""
         # Only check every few seconds to avoid hitting API limits
         if (self.last_order_check_time is None or 
@@ -1525,7 +1655,7 @@ class TradingEngine:
             self.last_order_check_time = current_time
             
             if not self.active_limit_orders:
-                return
+                return {'action': 'none', 'exit_data': None}
             
             self.log(f" CHECKING LIMIT ORDERS: {len(self.active_limit_orders)} active orders")
             
@@ -1541,6 +1671,17 @@ class TradingEngine:
                         filled_position = order_info['position']
                         trade_positions = order_info['trade_positions']
                         expiration = order_info['expiration']
+                        
+                        # Check if this trade is still active before processing
+                        trade_still_active = False
+                        for active_trade in self.active_trades:
+                            if any(pos.trade_id == filled_position.trade_id for pos in active_trade if hasattr(pos, 'trade_id')):
+                                trade_still_active = True
+                                break
+                        
+                        if not trade_still_active:
+                            self.log(f" ORDER {order_id} already FILLED, skipping cancel")
+                            continue
                         
                         self.log(f" LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
                         self.log(f" Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
@@ -1566,9 +1707,17 @@ class TradingEngine:
                         
                         # Find trade index to remove
                         trade_index = None
+                        # Primary: match by trade_id
                         for i, trade in enumerate(self.active_trades):
                             if any(pos.trade_id == filled_position.trade_id for pos in trade if hasattr(pos, 'trade_id')):
                                 trade_index = i
+                                break
+                        # Fallback: match by the filled limit order ID on any position
+                        if trade_index is None:
+                            for i, trade in enumerate(self.active_trades):
+                                if any(getattr(pos, 'limit_order_id', None) == order_id for pos in trade):
+                                    trade_index = i
+                                    break
                                 break
                         
                         if trade_index is not None:
@@ -1656,6 +1805,9 @@ class TradingEngine:
                             self.active_trades.pop(trade_index)
                             self.trade_entry_times.pop(trade_index)
                             
+                            # Return exit information for multi-account manager
+                            return {'action': 'exit', 'exit_data': exit_data}
+                            
                         else:
                             self.log(f" Could not find trade index for filled limit order {order_id}")
                 
@@ -1668,6 +1820,11 @@ class TradingEngine:
             for order_id in filled_orders:
                 if order_id in self.active_limit_orders:
                     del self.active_limit_orders[order_id]
+            
+            return {'action': 'none', 'exit_data': None}
+        
+        # If we didn't check due to interval throttle, return a no-op result
+        return {'action': 'none', 'exit_data': None}
     
     def cancel_trade_limit_orders(self, trade_positions: List[Position], exclude_order_id: str = None):
         """Cancel all limit orders for a trade, optionally excluding one order"""
@@ -1934,63 +2091,66 @@ class TradingEngine:
         # Log files
         self.log(f" Log File: {self.log_file}")
         self.log("=" * 80)
-        # Append detailed signal/trade analytics in a professional, narrative style
-        self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
-        filtered_signals = [entry for entry in self.signal_trade_log if 'entry_time' in entry]
-        if not filtered_signals:
-            self.log("No signals (entries) detected during this backtest.")
-        else:
-            for idx, entry in enumerate(filtered_signals, 1):
-                entry_time = entry.get('entry_time', 'N/A')
-                self.log(f"Signal {idx} (Trade ID: {entry.get('trade_id', 'N/A')}):")
-                self.log(f"  Detection Time: {entry_time}")
-                detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
-                self.log(f"  Detection Condition: {detection_cond}")
-                if entry['positions']:
-                    self.log(f"  Selected Options:")
-                    for pos in entry['positions']:
-                        self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
-                else:
-                    self.log(f"  Selected Options: None")
-                self.log(f"  Entry Time: {entry_time}")
-                self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
-                self.log(f"  Commission: ${entry.get('entry_commission', '')}")
-                self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
-                if entry.get('exit_time'):
-                    self.log(f"  Exit Time: {entry.get('exit_time', 'N/A')}")
-                    self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
-                    self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
-                    self.log(f"  P&L: ${entry.get('pnl', 'N/A')}")
-                    pnl = entry.get('pnl')
-                    if pnl is not None:
-                        result_str = 'WIN' if pnl > 0 else 'LOSS'
-                        self.log(f"  Result: {result_str}")
-                    try:
-                        import datetime
-                        entry_time_dt = entry.get('entry_time')
-                        exit_time_dt = entry.get('exit_time')
-                        if isinstance(entry_time_dt, str):
-                            entry_time_dt = datetime.datetime.fromisoformat(str(entry_time_dt))
-                        if isinstance(exit_time_dt, str):
-                            exit_time_dt = datetime.datetime.fromisoformat(str(exit_time_dt))
-                        holding = exit_time_dt - entry_time_dt
-                        self.log(f"  Holding Time: {holding}")
-                    except Exception:
-                        pass
-                    self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
-                else:
-                    self.log(f"  Exit: Still Open or Not Exited During Backtest")
-                    self.log(f"  P&L: N/A")
-                    self.log(f"  Result: OPEN")
-                self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
-                self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
-                self.log(f"  Symbol: {entry.get('symbol', '')}")
-                self.log(f"  ---")
-        self.log("=" * 80)
+
+        # Only show detailed analytics for backtest mode
+        if self.mode == 'backtest':
+            # Append detailed signal/trade analytics in a professional, narrative style
+            self.log("================ DETAILED SIGNAL/TRADE ANALYTICS ================")
+            filtered_signals = [entry for entry in self.signal_trade_log if 'entry_time' in entry]
+            if not filtered_signals:
+                self.log("No signals (entries) detected during this backtest.")
+            else:
+                for idx, entry in enumerate(filtered_signals, 1):
+                    entry_time = entry.get('entry_time', 'N/A')
+                    self.log(f"Signal {idx} (Trade ID: {entry.get('trade_id', 'N/A')}):")
+                    self.log(f"  Detection Time: {entry_time}")
+                    detection_cond = f"Move {entry.get('move_percent', 0):.2f}% in window, signal detected"
+                    self.log(f"  Detection Condition: {detection_cond}")
+                    if entry['positions']:
+                        self.log(f"  Selected Options:")
+                        for pos in entry['positions']:
+                            self.log(f"    - {pos.get('type', '').upper()} {pos.get('symbol', '')} {pos.get('strike', '')} Exp: {pos.get('expiration_date', '')} Entry: ${pos.get('entry_price', '')} Contracts: {pos.get('contracts', '')}")
+                    else:
+                        self.log(f"  Selected Options: None")
+                    self.log(f"  Entry Time: {entry_time}")
+                    self.log(f"  Entry Cost: ${entry.get('entry_cost', '')}")
+                    self.log(f"  Commission: ${entry.get('entry_commission', '')}")
+                    self.log(f"  Total Entry Cost: ${entry.get('total_entry_cost', '')}")
+                    if entry.get('exit_time'):
+                        self.log(f"  Exit Time: {entry.get('exit_time', 'N/A')}")
+                        self.log(f"  Exit Value: ${entry.get('exit_value', '')}")
+                        self.log(f"  Exit Commission: ${entry.get('exit_commission', '')}")
+                        self.log(f"  P&L: ${entry.get('pnl', 'N/A')}")
+                        pnl = entry.get('pnl')
+                        if pnl is not None:
+                            result_str = 'WIN' if pnl > 0 else 'LOSS'
+                            self.log(f"  Result: {result_str}")
+                        try:
+                            import datetime
+                            entry_time_dt = entry.get('entry_time')
+                            exit_time_dt = entry.get('exit_time')
+                            if isinstance(entry_time_dt, str):
+                                entry_time_dt = datetime.datetime.fromisoformat(str(entry_time_dt))
+                            if isinstance(exit_time_dt, str):
+                                exit_time_dt = datetime.datetime.fromisoformat(str(exit_time_dt))
+                            holding = exit_time_dt - entry_time_dt
+                            self.log(f"  Holding Time: {holding}")
+                        except Exception:
+                            pass
+                        self.log(f"  Exit Reason: {entry.get('exit_reason', 'N/A')}")
+                    else:
+                        self.log(f"  Exit: Still Open or Not Exited During Backtest")
+                        self.log(f"  P&L: N/A")
+                        self.log(f"  Result: OPEN")
+                    self.log(f"  Trades Active at Entry: {entry.get('trades_active', '')}")
+                    self.log(f"  Market Price at Entry: ${entry.get('price', '')}")
+                    self.log(f"  Symbol: {entry.get('symbol', '')}")
+                    self.log(f"  ---")
+            self.log("=" * 80)
         
         self.log("=" * 80)
 
-    def finish(self):
+    def finish(self, suppress_logging=False):
         """Call this when trading is finished (end of data or user interrupt) to log final results."""
         # Cancel any remaining limit orders before finishing
         if self.active_limit_orders:
@@ -2018,10 +2178,12 @@ class TradingEngine:
             self.active_limit_orders.clear()
             self.log(f" CLEANUP COMPLETE: All limit orders processed")
         
-        # Send system stop alert to Telegram
-        self._send_system_stop_alert()
-        
-        self.log_final_results()
+        # Send system stop alert to Telegram (disabled for live/paper - handled by MultiAccountTelegramManager)
+        if not suppress_logging and self.mode == 'backtest':
+            self._send_system_stop_alert()
+
+        if not suppress_logging:
+            self.log_final_results()
 
     def get_market_timing_status(self, current_time: datetime.datetime) -> Dict:
         """Get current market timing status for debugging"""

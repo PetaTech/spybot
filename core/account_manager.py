@@ -56,8 +56,17 @@ class AccountManager:
             mode=self.mode,
             api_url=self.api_url,
             access_token=self.access_token,
-            account_id=self.account_id
+            account_id=self.account_id,
+            telegram_config=self.get_telegram_config()
         )
+
+        # Initialize VIX parameters at startup to avoid Unknown/None in first alerts
+        try:
+            if hasattr(self.trading_engine, '_set_vix_parameters'):
+                # Force an initial refresh; method already caches thereafter
+                self.trading_engine._set_vix_parameters(force=True, target_datetime=None)
+        except Exception as e:
+            self.log(f"Initial VIX initialization failed: {e}", level='WARNING')
 
         # Account state
         self.is_running = False
@@ -320,18 +329,41 @@ class AccountManager:
         if not self.enabled or not self.is_running:
             return False
 
-        # Check if we've processed data recently
-        if self.market_data_count == 0:
-            return False
+        # During market hours, check if we've processed data recently
+        # Outside market hours, always pass health check
+        import datetime
+        from dateutil import tz
 
-        # Add more health checks as needed
+        now = datetime.datetime.now(tz=tz.gettz('America/New_York'))
+        market_open = datetime.time(9, 30)
+        market_close = datetime.time(16, 0)
+        current_time = now.time()
+
+        # Check if market is open (Monday-Friday, 9:30 AM - 4:00 PM ET)
+        is_weekday = now.weekday() < 5  # Monday=0, Friday=4
+        is_market_hours = market_open <= current_time <= market_close
+
+        if is_weekday and is_market_hours:
+            # Market is open, require data processing
+            if self.market_data_count == 0:
+                return False
+
+        # Outside market hours or weekend, health check passes
         return True
 
     def restart(self):
         """Restart the account manager"""
         self.log("Restarting account manager")
-        self.stop()
+        self.stop_for_restart()
         return self.start()
+
+    def stop_for_restart(self):
+        """Stop the account manager for restart (suppresses final results logging)"""
+        self.is_running = False
+
+        # Finish trading engine without logging final results
+        if hasattr(self.trading_engine, 'finish'):
+            self.trading_engine.finish(suppress_logging=True)
 
     def update_config(self, new_overrides: Dict):
         """

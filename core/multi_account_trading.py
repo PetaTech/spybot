@@ -49,6 +49,7 @@ class MultiAccountManager:
 
         # Threading
         self.running = False
+        self.stopping = False  # Prevent multiple shutdown calls
         self.monitoring_thread = None
         self.executor = ThreadPoolExecutor(max_workers=20)  # For parallel processing
 
@@ -158,6 +159,23 @@ class MultiAccountManager:
                     self.account_managers[account_key] = account_manager
                     self.account_restart_counts[account_key] = 0
 
+                    # Initialize VIX immediately for each engine before any data processing
+                    try:
+                        if hasattr(account_manager, 'trading_engine') and hasattr(account_manager.trading_engine, '_set_vix_parameters'):
+                            # Ensure cache is primed then force refresh
+                            if not hasattr(account_manager.trading_engine, '_vix_last_fetch_time'):
+                                account_manager.trading_engine._vix_last_fetch_time = 0
+                            account_manager.trading_engine._set_vix_parameters(force=True, target_datetime=None)
+                    except Exception as e:
+                        print(f"     ⚠️ VIX init failed for {account_key}: {e}")
+
+                    # Attach shared data provider to this account's engine (enables option chain fetches)
+                    try:
+                        account_manager.trading_engine.data_provider = self.shared_data_provider
+                        print(f"     🔗 Data provider attached to {account_manager.account_name}")
+                    except Exception as e:
+                        print(f"     ❌ Failed to attach data provider to {account_manager.account_name}: {e}")
+
                     # Register with shared data provider
                     subscriber_id = self.shared_data_provider.add_subscriber(
                         lambda data, acc_key=account_key: self._process_account_data(acc_key, data)
@@ -245,29 +263,58 @@ class MultiAccountManager:
 
     def stop(self):
         """Stop multi-account trading"""
+        if getattr(self, 'stopping', False):
+            # Avoid duplicate logs on repeated stop calls
+            return
+
+        self.stopping = True
         print(f"\n🛑 Stopping Multi-Account Trading...")
         self.running = False
+
+        # Stop shared data provider FIRST to prevent new data processing (non-blocking)
+        if self.shared_data_provider and getattr(self.shared_data_provider, 'running', False):
+            print("   🛑 Stopping data provider...")
+            self.shared_data_provider.running = False  # Signal to stop, don't wait
 
         # Stop account managers
         for account_name, account_manager in self.account_managers.items():
             try:
                 account_manager.stop()
+
+                # Send shutdown telegram alert
+                final_data = {
+                    'timestamp': datetime.datetime.now(),
+                    'mode': self.mode,
+                    'total_pnl': getattr(account_manager.trading_engine, 'total_pnl', 0),
+                    'total_trades': getattr(account_manager.trading_engine, 'total_trades', 0)
+                }
+                print(f"   📱 Sending shutdown alert for {account_name}...")
+                success = self.telegram_manager.send_shutdown_alert(account_name, final_data)
+                if success:
+                    print(f"   ✅ Shutdown alert sent for {account_name}")
+                else:
+                    print(f"   ❌ Failed to send shutdown alert for {account_name}")
+
                 print(f"   ✅ {account_name} stopped")
             except Exception as e:
                 print(f"   ❌ Error stopping {account_name}: {e}")
 
-        # Stop shared data provider
+        # Properly stop data provider with timeout
         if self.shared_data_provider:
-            self.shared_data_provider.stop()
+            try:
+                self.shared_data_provider.stop()
+            except Exception as e:
+                print(f"   ⚠️ Data provider stop timeout: {e}")
 
         # Stop monitoring thread
         if self.monitoring_thread:
             self.monitoring_thread.join(timeout=5)
 
         # Shutdown executor
-        self.executor.shutdown(wait=True, timeout=10)
+        # ThreadPoolExecutor.shutdown has no 'timeout' parameter; wait and handle our own timeout externally if needed
+        self.executor.shutdown(wait=True)
 
-        print(f"✅ Multi-Account Trading stopped")
+        print("✅ Multi-Account Trading stopped")
 
     def _process_account_data(self, account_name: str, market_data: MarketData):
         """Process market data for a specific account (called by shared data provider)"""
@@ -302,7 +349,9 @@ class MultiAccountManager:
                 self.telegram_manager.send_entry_alert(account_name, result)
 
             elif action == 'exit':
-                self.telegram_manager.send_exit_alert(account_name, result)
+                # Use exit_data if available, otherwise use result
+                exit_data = result.get('exit_data', result)
+                self.telegram_manager.send_exit_alert(account_name, exit_data)
 
             elif action == 'error':
                 error_msg = result.get('error', 'Unknown error')
@@ -379,9 +428,20 @@ class MultiAccountManager:
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
-        print(f"\n🔔 Received signal {signum}, shutting down gracefully...")
-        self.stop()
-        sys.exit(0)
+        if signum == signal.SIGINT:
+            print(f"\n⌨️  Ctrl+C pressed, shutting down gracefully...")
+        elif signum == signal.SIGTERM:
+            print(f"\n🛑 Termination signal received, shutting down gracefully...")
+        else:
+            print(f"\n🔔 Shutdown signal {signum} received, shutting down gracefully...")
+
+        try:
+            self.stop()
+            print("✅ Shutdown complete")
+        except Exception as e:
+            print(f"❌ Error during shutdown: {e}")
+        finally:
+            sys.exit(0)
 
     def get_status(self) -> Dict:
         """Get comprehensive status of multi-account manager"""

@@ -7,6 +7,10 @@ Supports 10+ Tradier accounts (mix of live/paper) with strategy overrides
 TRADIER_LIVE_API_URL = 'https://api.tradier.com/v1'
 TRADIER_PAPER_API_URL = 'https://sandbox.tradier.com/v1'
 
+TEST_TELEGRAM_BOT_MODE = False
+TEST_TELEGRAM_BOT_TOKEN = '8499671099:AAFsxsxQLJ5MLMghPgW9pxJFyiznP484dxw'
+TEST_TELEGRAM_CHAT_ID = '-1003173585598'
+
 # === Account Configurations ===
 ACCOUNTS = [
     {
@@ -230,6 +234,14 @@ def get_enabled_accounts(mode: str = None):
                 'account_index': i  # Use index as identifier instead of name
             })
 
+        # Override telegram configuration in test mode
+        if TEST_TELEGRAM_BOT_MODE:
+            account_config['telegram'] = {
+                'bot_token': TEST_TELEGRAM_BOT_TOKEN,
+                'chat_id': TEST_TELEGRAM_CHAT_ID,
+                'enabled': True
+            }
+
         enabled_accounts.append(account_config)
 
     return enabled_accounts
@@ -270,6 +282,13 @@ def get_account_by_index(index, mode=None):
             'mode': mode,
             'account_index': index
         })
+        # Override telegram configuration in test mode (consistency)
+        if TEST_TELEGRAM_BOT_MODE:
+            account_config['telegram'] = {
+                'bot_token': TEST_TELEGRAM_BOT_TOKEN,
+                'chat_id': TEST_TELEGRAM_CHAT_ID,
+                'enabled': True
+            }
         return account_config
     return acc
 
