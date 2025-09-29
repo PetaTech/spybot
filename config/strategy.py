@@ -39,13 +39,13 @@ STATIC_VIX_MODE = False  # If True, use STATIC_VIX_VALUE instead of fetching fro
 STATIC_VIX_VALUE = 20.0  # Static VIX value to use when STATIC_VIX_MODE is enabled
 
 # High Volatility Parameters
-HIGH_VOL_MOVE_THRESHOLD = 0.0005  # SPY price move threshold for high volatility
+HIGH_VOL_MOVE_THRESHOLD = 3.5  # SPY price move threshold for high volatility
 HIGH_VOL_PREMIUM_MIN = 1.05    # Min option premium for high volatility
 HIGH_VOL_PREMIUM_MAX = 2.20    # Max option premium for high volatility
-HIGH_VOL_PROFIT_TARGET = 2.25  # 225% of entry price for high volatility
+HIGH_VOL_PROFIT_TARGET = 2.35  # 235% of entry price for high volatility
 
 # Low Volatility Parameters
-LOW_VOL_MOVE_THRESHOLD = 0.0005   # SPY price move threshold for low volatility
+LOW_VOL_MOVE_THRESHOLD = 2.5   # SPY price move threshold for low volatility
 LOW_VOL_PREMIUM_MIN = 0.40    # Min option premium for low volatility
 LOW_VOL_PREMIUM_MAX = 1.05    # Max option premium for low volatility
 LOW_VOL_PROFIT_TARGET = 2.25  # 225% of entry price for low volatility
