@@ -46,8 +46,8 @@ class AccountManager:
         # Build strategy configuration with overrides
         self.strategy_config = self._build_strategy_config()
 
-        # Set API credentials for this account
-        set_api_credentials(self.api_url, self.access_token, self.account_id)
+        # DO NOT set global API credentials here - each account will use its own via api_url/access_token/account_id params
+        # The trading engine's order executor will use the account-specific credentials passed in
 
         # Create trading engine for this account
         self.trading_engine = TradingEngine(

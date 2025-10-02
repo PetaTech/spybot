@@ -177,8 +177,12 @@ class MultiAccountManager:
                         print(f"     ❌ Failed to attach data provider to {account_manager.account_name}: {e}")
 
                     # Register with shared data provider
+                    # Use a closure to capture the account_key by value
+                    def create_callback(acc_key):
+                        return lambda data: self._process_account_data(acc_key, data)
+                    
                     subscriber_id = self.shared_data_provider.add_subscriber(
-                        lambda data, acc_key=account_key: self._process_account_data(acc_key, data)
+                        create_callback(account_key)
                     )
 
                     print(f"     ✅ {account_manager.account_name} initialized (subscriber #{subscriber_id})")
@@ -226,25 +230,24 @@ class MultiAccountManager:
             # Start shared data provider
             self.shared_data_provider.start()
 
-            # Start all account managers with staggered startup
-            startup_delay = ORCHESTRATION.get('startup_delay_between_accounts', 2)
-            for i, (account_name, account_manager) in enumerate(self.account_managers.items()):
-                if i > 0:  # No delay for first account
-                    print(f"   Waiting {startup_delay}s before starting {account_name}...")
-                    time.sleep(startup_delay)
-
+            # Start all account managers SIMULTANEOUSLY (no staggered startup)
+            # This ensures all accounts have identical trading behavior
+            print(f"   Starting all {len(self.account_managers)} accounts simultaneously...")
+            for account_name, account_manager in self.account_managers.items():
                 if account_manager.start():
                     print(f"   ✅ {account_name} started")
-
-                    # Send startup notification
+                else:
+                    print(f"   ❌ {account_name} failed to start")
+            
+            # Send startup notifications after all accounts are started
+            for account_name, account_manager in self.account_managers.items():
+                if account_manager.is_running:
                     config_summary = account_manager.get_strategy_config_summary()
                     config_summary.update({
                         'account_id': account_manager.account_id,
                         'mode': account_manager.mode
                     })
                     self.telegram_manager.send_startup_message(account_name, config_summary)
-                else:
-                    print(f"   ❌ {account_name} failed to start")
 
             # Start monitoring thread
             self.monitoring_thread = threading.Thread(target=self._monitoring_loop, daemon=True)
@@ -339,26 +342,52 @@ class MultiAccountManager:
 
     def _handle_notifications(self, account_name: str, result: Dict):
         """Handle telegram notifications based on trading results"""
-        try:
-            action = result.get('action', '')
+        action = result.get('action', '')
+        print(f"[NOTIF DEBUG] Handling notifications for {account_name}, action={action}, signal_detected={result.get('signal_detected', False)}")
 
-            if result.get('signal_detected'):
+        # Handle signal alert (don't let it block other notifications)
+        if result.get('signal_detected'):
+            try:
+                print(f"[NOTIF DEBUG] Sending signal alert for {account_name}")
                 self.telegram_manager.send_signal_alert(account_name, result)
+            except Exception as e:
+                print(f"❌ Error sending signal alert for {account_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
-            if action == 'entry':
-                self.telegram_manager.send_entry_alert(account_name, result)
+        # Handle entry alert
+        if action == 'entry':
+            try:
+                print(f"[NOTIF DEBUG] Sending entry alert for {account_name}")
+                success = self.telegram_manager.send_entry_alert(account_name, result)
+                print(f"[NOTIF DEBUG] Entry alert sent: {success}")
+            except Exception as e:
+                print(f"❌ Error sending entry alert for {account_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
-            elif action == 'exit':
+        # Handle exit alert
+        elif action == 'exit':
+            try:
+                print(f"[NOTIF DEBUG] Sending exit alert for {account_name}")
                 # Use exit_data if available, otherwise use result
                 exit_data = result.get('exit_data', result)
                 self.telegram_manager.send_exit_alert(account_name, exit_data)
+            except Exception as e:
+                print(f"❌ Error sending exit alert for {account_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
-            elif action == 'error':
+        # Handle error alert
+        elif action == 'error':
+            try:
+                print(f"[NOTIF DEBUG] Sending error alert for {account_name}")
                 error_msg = result.get('error', 'Unknown error')
                 self.telegram_manager.send_error_alert(account_name, error_msg)
-
-        except Exception as e:
-            print(f"❌ Error handling notifications for {account_name}: {e}")
+            except Exception as e:
+                print(f"❌ Error sending error alert for {account_name}: {e}")
+                import traceback
+                traceback.print_exc()
 
     def _monitoring_loop(self):
         """Monitoring loop (runs in separate thread)"""
@@ -367,6 +396,11 @@ class MultiAccountManager:
         max_restart_attempts = ORCHESTRATION.get('max_account_restart_attempts', 3)
 
         print(f"🔍 Monitoring started (check every {check_interval}s)")
+        
+        # Give accounts grace period to start and process initial data
+        startup_grace_period = 10  # Wait 10 seconds before first health check
+        print(f"   Waiting {startup_grace_period}s grace period for accounts to initialize...")
+        time.sleep(startup_grace_period)
 
         while self.running:
             try:

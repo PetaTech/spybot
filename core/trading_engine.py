@@ -171,7 +171,10 @@ class PaperOrderExecutor(OrderExecutor):
                    action: str, expiration_date: str, price: Optional[float] = None) -> str:
         """Place ACTUAL order in sandbox environment"""
         # Import here to avoid circular imports
-        from utils.tradier_api import place_order
+        from utils.tradier_api import place_order, set_api_credentials
+        
+        # Set API credentials for THIS account before placing order
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         
         # Place real order in sandbox
         order_id = place_order(option_type, strike, contracts, action=action, 
@@ -186,7 +189,10 @@ class PaperOrderExecutor(OrderExecutor):
                          action: str, expiration_date: str, limit_price: float) -> str:
         """Place ACTUAL limit order in sandbox environment"""
         # Import here to avoid circular imports
-        from utils.tradier_api import place_limit_order
+        from utils.tradier_api import place_limit_order, set_api_credentials
+        
+        # Set API credentials for THIS account before placing order
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         
         # Place real limit order in sandbox
         order_id = place_limit_order(option_type, strike, contracts, action=action, 
@@ -199,12 +205,16 @@ class PaperOrderExecutor(OrderExecutor):
     
     def get_order_status(self, order_id: str) -> Dict:
         """Get ACTUAL order status from sandbox"""
-        from utils.tradier_api import get_order_status
+        from utils.tradier_api import get_order_status, set_api_credentials
+        # Set API credentials for THIS account before checking status
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return get_order_status(order_id)
     
     def cancel_order(self, order_id: str) -> bool:
         """Cancel ACTUAL order in sandbox"""
-        from utils.tradier_api import cancel_order
+        from utils.tradier_api import cancel_order, set_api_credentials
+        # Set API credentials for THIS account before cancelling
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return cancel_order(order_id)
 
 
@@ -220,7 +230,9 @@ class LiveOrderExecutor(OrderExecutor):
                    action: str, expiration_date: str, price: Optional[float] = None) -> str:
         """Place order using live API"""
         # Import here to avoid circular imports
-        from utils.tradier_api import place_order
+        from utils.tradier_api import place_order, set_api_credentials
+        # Set API credentials for THIS account before placing order
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return place_order(option_type, strike, contracts, action=action, 
                           expiration_date=expiration_date, price=price)
     
@@ -228,18 +240,24 @@ class LiveOrderExecutor(OrderExecutor):
                          action: str, expiration_date: str, limit_price: float) -> str:
         """Place limit order using live API"""
         # Import here to avoid circular imports
-        from utils.tradier_api import place_limit_order
+        from utils.tradier_api import place_limit_order, set_api_credentials
+        # Set API credentials for THIS account before placing order
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return place_limit_order(option_type, strike, contracts, action=action, 
                                 expiration_date=expiration_date, limit_price=limit_price)
     
     def get_order_status(self, order_id: str) -> Dict:
         """Get order status from live API"""
-        from utils.tradier_api import get_order_status
+        from utils.tradier_api import get_order_status, set_api_credentials
+        # Set API credentials for THIS account before checking status
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return get_order_status(order_id)
     
     def cancel_order(self, order_id: str) -> bool:
         """Cancel order using live API"""
-        from utils.tradier_api import cancel_order
+        from utils.tradier_api import cancel_order, set_api_credentials
+        # Set API credentials for THIS account before cancelling
+        set_api_credentials(self.api_url, self.access_token, self.account_id)
         return cancel_order(order_id)
 
 
@@ -738,6 +756,7 @@ class TradingEngine:
                                 self.active_trades.append(positions)
                                 self.trade_entry_times.append(market_row.current_time)
                                 self.last_trade_time = market_row.current_time
+                                # Note: Do NOT reset last_flagged_time here - it enforces cooldown between signals
                                 
                                 entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in positions)
                                 entry_commission = self.calculate_total_trade_cost(positions, is_exit=False)
@@ -1718,14 +1737,33 @@ class TradingEngine:
                                 if any(getattr(pos, 'limit_order_id', None) == order_id for pos in trade):
                                     trade_index = i
                                     break
-                                break
                         
                         if trade_index is not None:
                             # Cancel all other limit orders for this trade
                             self.cancel_trade_limit_orders(trade_positions, exclude_order_id=order_id)
                             
                             # Market sell the remaining position(s) with retry logic
-                            remaining_positions = [pos for pos in trade_positions if pos.limit_order_id != order_id]
+                            # Only market sell positions that are NOT the one that just filled AND whose limit order hasn't filled
+                            remaining_positions = []
+                            for pos in trade_positions:
+                                if pos.limit_order_id == order_id:
+                                    # This is the position that just filled, skip it
+                                    continue
+                                
+                                # Check if this position's limit order is already filled
+                                if pos.limit_order_id and pos.limit_order_id != "FAILED":
+                                    try:
+                                        remaining_order_status = self.order_executor.get_order_status(pos.limit_order_id)
+                                        if remaining_order_status and remaining_order_status.get('status') == 'filled':
+                                            self.log(f" Position {pos.type} Strike={pos.strike} limit order {pos.limit_order_id} already filled, skipping market sell")
+                                            continue
+                                    except Exception as e:
+                                        self.log(f" Warning: Could not check status of limit order {pos.limit_order_id}: {e}")
+                                
+                                remaining_positions.append(pos)
+                            
+                            self.log(f" Filled position order_id: {order_id}")
+                            self.log(f" Trade has {len(trade_positions)} positions, {len(remaining_positions)} remaining to market sell")
                             if remaining_positions:
                                 self.log(f" MARKET SELLING REMAINING POSITIONS: {len(remaining_positions)} positions")
                                 for remaining_pos in remaining_positions:

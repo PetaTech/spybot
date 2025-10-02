@@ -150,7 +150,8 @@ class SharedDataProvider:
                 ohlc_data = get_spy_ohlc()
 
                 if ohlc_data is None:
-                    print(f"⚠️ No data received from {self.source_name}")
+                    print(f"⚠️ No data received from {self.source_name} at {now.strftime('%H:%M:%S')}")
+                    self.error_count += 1
                     time.sleep(5)
                     continue
 
@@ -190,7 +191,11 @@ class SharedDataProvider:
                 self.error_count += 1
                 self.last_error_time = datetime.datetime.now()
                 print(f"❌ Error in data collection loop: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(5)
+        
+        print(f"⚠️ Data collection loop EXITED for {self.source_name}! running={self.running}")
 
     def _broadcast_loop(self):
         """Broadcast loop to send data to subscribers (runs in separate thread)"""
@@ -245,19 +250,36 @@ class SharedDataProvider:
     def health_check(self) -> bool:
         """Check if provider is healthy"""
         if not self.running:
+            print(f"[HEALTH] Data provider not running")
             return False
 
-        # Check if we've received data recently
+        # Check if threads are alive
+        if self.data_thread and not self.data_thread.is_alive():
+            print(f"[HEALTH] ❌ Data collection thread is DEAD!")
+            return False
+        
+        if self.broadcast_thread and not self.broadcast_thread.is_alive():
+            print(f"[HEALTH] ❌ Broadcast thread is DEAD!")
+            return False
+
+        # Check if we've received data recently (be more lenient - allow up to 5 minutes gap)
         if self.latest_data:
             now = datetime.datetime.now(tz=tz.gettz('America/New_York'))
             data_age = (now - self.latest_data.timestamp).total_seconds()
-            if data_age > 60:  # No data for over 1 minute
+            if data_age > 300:  # No data for over 5 minutes
+                print(f"[HEALTH] ❌ No data for {data_age:.0f}s (last: {self.latest_data.timestamp.strftime('%H:%M:%S')})")
+                print(f"[HEALTH] Data count: {self.data_count}, Error count: {self.error_count}")
+                print(f"[HEALTH] Collection thread alive: {self.data_thread.is_alive() if self.data_thread else 'None'}")
                 return False
+            elif data_age > 60:
+                # Log warning but don't fail health check yet
+                print(f"[HEALTH] ⚠️ No data for {data_age:.0f}s (last: {self.latest_data.timestamp.strftime('%H:%M:%S')})")
 
         # Check error rate
         if self.error_count > 10 and self.data_count > 0:
             error_rate = self.error_count / self.data_count
             if error_rate > 0.1:  # More than 10% error rate
+                print(f"[HEALTH] ❌ High error rate: {error_rate:.1%} ({self.error_count}/{self.data_count})")
                 return False
 
         return True

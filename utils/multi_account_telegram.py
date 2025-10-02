@@ -112,8 +112,11 @@ class MultiAccountTelegramManager:
 
     def send_entry_alert(self, account_name: str, entry_data: Dict) -> bool:
         """Send trade entry alert for specific account"""
+        print(f"[TELEGRAM DEBUG] send_entry_alert called for {account_name}")
+        print(f"[TELEGRAM DEBUG] entry_data keys: {list(entry_data.keys())}")
         notifier = self.account_notifiers.get(account_name)
         if not notifier:
+            print(f"[TELEGRAM DEBUG] No notifier found for {account_name}")
             return False
 
         try:
@@ -153,25 +156,37 @@ class MultiAccountTelegramManager:
                 enhanced_entry_data['limit_orders_info'] = 'Limit orders placed for profit targets'
 
             # Normalize positions: prefer entry_positions; convert objects to dicts if needed
+            print(f"[TELEGRAM DEBUG] Normalizing positions...")
+            print(f"[TELEGRAM DEBUG] entry_positions exists: {'entry_positions' in enhanced_entry_data}")
+            print(f"[TELEGRAM DEBUG] positions exists: {'positions' in enhanced_entry_data}")
             positions_source = enhanced_entry_data.get('entry_positions') or enhanced_entry_data.get('positions') or []
+            print(f"[TELEGRAM DEBUG] positions_source type: {type(positions_source)}, len: {len(positions_source) if positions_source else 0}")
             normalized_positions = []
-            for p in positions_source:
+            for i, p in enumerate(positions_source):
+                print(f"[TELEGRAM DEBUG] Processing position {i}: type={type(p)}, is_dict={isinstance(p, dict)}")
                 if isinstance(p, dict):
                     normalized_positions.append(p)
+                    print(f"[TELEGRAM DEBUG] Position {i} added as dict: {p}")
                 else:
                     try:
-                        normalized_positions.append({
+                        norm_pos = {
                             'type': getattr(p, 'type', '?'),
                             'symbol': getattr(p, 'symbol', 'SPY'),
                             'strike': getattr(p, 'strike', 0),
                             'expiration': getattr(p, 'expiration_date', ''),
                             'entry_price': getattr(p, 'entry_price', 0.0),
                             'contracts': getattr(p, 'contracts', 0)
-                        })
-                    except Exception:
+                        }
+                        normalized_positions.append(norm_pos)
+                        print(f"[TELEGRAM DEBUG] Position {i} converted to dict: {norm_pos}")
+                    except Exception as e:
+                        print(f"[TELEGRAM DEBUG] Failed to normalize position {i}: {e}")
                         continue
             enhanced_entry_data['positions'] = normalized_positions
+            print(f"[TELEGRAM DEBUG] About to call notifier.send_entry_alert with {len(normalized_positions)} positions")
+            print(f"[TELEGRAM DEBUG] normalized_positions: {normalized_positions}")
             success = notifier.send_entry_alert(enhanced_entry_data)
+            print(f"[TELEGRAM DEBUG] notifier.send_entry_alert returned: {success}")
             if success:
                 self.notification_counts[account_name] += 1
             else:
@@ -180,6 +195,8 @@ class MultiAccountTelegramManager:
 
         except Exception as e:
             print(f"❌ Failed to send entry alert for {account_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def send_exit_alert(self, account_name: str, exit_data: Dict) -> bool:
