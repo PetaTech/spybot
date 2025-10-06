@@ -284,12 +284,16 @@ class MultiAccountManager:
             try:
                 account_manager.stop()
 
-                # Send shutdown telegram alert
+                # Send shutdown telegram alert with comprehensive P&L
+                comprehensive_pnl = account_manager.trading_engine.get_comprehensive_pnl()
                 final_data = {
                     'timestamp': datetime.datetime.now(),
                     'mode': self.mode,
-                    'total_pnl': getattr(account_manager.trading_engine, 'total_pnl', 0),
-                    'total_trades': getattr(account_manager.trading_engine, 'total_trades', 0)
+                    'total_pnl': comprehensive_pnl.get('total_pnl', 0),
+                    'completed_pnl': comprehensive_pnl.get('completed_pnl', 0),
+                    'unclosed_pnl': comprehensive_pnl.get('unclosed_pnl', 0),
+                    'total_trades': getattr(account_manager.trading_engine, 'total_trades', 0),
+                    'unclosed_positions': comprehensive_pnl.get('unclosed_positions', 0)
                 }
                 print(f"   📱 Sending shutdown alert for {account_name}...")
                 success = self.telegram_manager.send_shutdown_alert(account_name, final_data)

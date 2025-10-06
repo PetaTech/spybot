@@ -639,13 +639,19 @@ class TradingEngine:
                         self.update_trade_metrics(trade_pnl)
                         
                         # Send Telegram trade exit alert
-                        trade_id = getattr(trade_positions[0], 'trade_id', trade_index + 1) if trade_positions else trade_index + 1
+                        # Always use the actual trade_id from the position object for consistency
+                        trade_id = getattr(trade_positions[0], 'trade_id', None) if trade_positions else None
+                        if trade_id is None:
+                            self.log(f" WARNING: Trade at index {trade_index} has no trade_id, using fallback")
+                            trade_id = trade_index + 1
                         holding_time_minutes = (market_row.current_time - entry_time).total_seconds() / 60
                         holding_time = f"{holding_time_minutes:.1f} minutes"
                         
                         # Calculate win rate (handle None PnL values)
-                        total_completed_trades = self.total_trades
-                        wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl') is not None and entry.get('pnl', 0) > 0)
+                        # Use actual completed trades, not just entries
+                        completed_trades = [entry for entry in self.signal_trade_log if entry.get('pnl') is not None]
+                        total_completed_trades = len(completed_trades)
+                        wins = sum(1 for entry in completed_trades if entry.get('pnl', 0) > 0)
                         win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
                         
                         exit_data = {
@@ -753,6 +759,11 @@ class TradingEngine:
                         if len(positions) == 2:
                             # Execute entry
                             if self.execute_entry(positions, expiration):
+                                # Validate trade IDs are properly set
+                                for pos in positions:
+                                    if not hasattr(pos, 'trade_id') or pos.trade_id is None:
+                                        self.log(f" WARNING: Position {pos.type} Strike={pos.strike} missing trade_id!")
+                                
                                 self.active_trades.append(positions)
                                 self.trade_entry_times.append(market_row.current_time)
                                 self.last_trade_time = market_row.current_time
@@ -1290,8 +1301,10 @@ class TradingEngine:
                     if len(positions) == 0:
                         self.trade_id_counter += 1
                         current_trade_id = self.trade_id_counter
+                        self.log(f" ASSIGNING NEW TRADE ID: {current_trade_id}")
                     else:
                         current_trade_id = self.trade_id_counter
+                        self.log(f" USING EXISTING TRADE ID: {current_trade_id}")
 
                     positions.append(Position(
                         type=option_type,
@@ -1806,14 +1819,20 @@ class TradingEngine:
                             self.update_trade_metrics(trade_pnl)
                             
                             # Send Telegram trade exit alert
-                            trade_id = getattr(filled_position, 'trade_id', trade_index + 1) if hasattr(filled_position, 'trade_id') else trade_index + 1
+                            # Always use the actual trade_id from the position object for consistency
+                            trade_id = getattr(filled_position, 'trade_id', None)
+                            if trade_id is None:
+                                self.log(f" WARNING: Position {filled_position.type} Strike={filled_position.strike} has no trade_id, using fallback")
+                                trade_id = trade_index + 1
                             entry_time = self.trade_entry_times[trade_index] if trade_index is not None and trade_index < len(self.trade_entry_times) else current_time
                             holding_time_minutes = (current_time - entry_time).total_seconds() / 60
                             holding_time = f"{holding_time_minutes:.1f} minutes"
                             
                             # Calculate win rate (handle None PnL values)
-                            total_completed_trades = self.total_trades
-                            wins = sum(1 for entry in self.signal_trade_log if entry.get('pnl') is not None and entry.get('pnl', 0) > 0)
+                            # Use actual completed trades, not just entries
+                            completed_trades = [entry for entry in self.signal_trade_log if entry.get('pnl') is not None]
+                            total_completed_trades = len(completed_trades)
+                            wins = sum(1 for entry in completed_trades if entry.get('pnl', 0) > 0)
                             win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
                             
                             exit_data = {
@@ -1946,6 +1965,38 @@ class TradingEngine:
             self.winning_trades += 1
         else:
             self.losing_trades += 1
+    
+    def get_comprehensive_pnl(self) -> Dict:
+        """Get comprehensive P&L including unclosed positions"""
+        completed_pnl = self.total_pnl
+        unclosed_pnl = 0.0
+        unclosed_positions = 0
+        
+        # Calculate P&L for unclosed positions
+        for trade_positions in self.active_trades:
+            if trade_positions:
+                try:
+                    entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)
+                    entry_commission = self.calculate_total_trade_cost(trade_positions, is_exit=False)
+                    
+                    # Estimate current exit value (use entry price as conservative estimate)
+                    estimated_exit_value = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)
+                    exit_commission = self.calculate_total_trade_cost(trade_positions, is_exit=True)
+                    
+                    trade_pnl = estimated_exit_value - entry_cost - entry_commission - exit_commission
+                    unclosed_pnl += trade_pnl
+                    unclosed_positions += 1
+                    
+                except Exception as e:
+                    self.log(f" ERROR calculating unclosed P&L: {e}")
+        
+        return {
+            'completed_pnl': completed_pnl,
+            'unclosed_pnl': unclosed_pnl,
+            'total_pnl': completed_pnl + unclosed_pnl,
+            'unclosed_positions': unclosed_positions,
+            'active_trades': len(self.active_trades)
+        }
     
     def get_status(self) -> Dict:
         """Get current engine status"""
@@ -2215,6 +2266,71 @@ class TradingEngine:
             # Clear the tracking
             self.active_limit_orders.clear()
             self.log(f" CLEANUP COMPLETE: All limit orders processed")
+        
+        # Force close any remaining open positions
+        if self.active_trades:
+            self.log(f" CLEANUP: Force closing {len(self.active_trades)} remaining positions...")
+            for trade_index, trade_positions in enumerate(self.active_trades):
+                try:
+                    if trade_positions and trade_positions[0].expiration_date:
+                        expiration = trade_positions[0].expiration_date
+                        
+                        # Market sell all positions in this trade
+                        total_exit_value = 0
+                        for pos in trade_positions:
+                            try:
+                                # Place market sell order
+                                market_order_id = self.order_executor.place_order(
+                                    option_type=pos.type,
+                                    strike=pos.strike,
+                                    contracts=pos.contracts,
+                                    action="SELL",
+                                    expiration_date=expiration
+                                )
+                                
+                                if market_order_id != "FAILED":
+                                    self.log(f" CLEANUP: Market sold {pos.type} Strike={pos.strike} OrderID={market_order_id}")
+                                    # Estimate exit value (use entry price as fallback)
+                                    estimated_exit_value = pos.entry_price * 100 * pos.contracts
+                                    total_exit_value += estimated_exit_value
+                                else:
+                                    self.log(f" CLEANUP: Failed to market sell {pos.type} Strike={pos.strike}")
+                                    
+                            except Exception as e:
+                                self.log(f" CLEANUP ERROR: Failed to close position {pos.type} Strike={pos.strike}: {e}")
+                        
+                        # Calculate P&L for this trade
+                        entry_cost = sum(pos.entry_price * 100 * pos.contracts for pos in trade_positions)
+                        entry_commission = self.calculate_total_trade_cost(trade_positions, is_exit=False)
+                        exit_commission = self.calculate_total_trade_cost(trade_positions, is_exit=True)
+                        
+                        trade_pnl = total_exit_value - entry_cost - entry_commission - exit_commission
+                        
+                        self.log(f" CLEANUP: Trade {trade_index + 1} force-closed. Entry=${entry_cost:.2f}, Exit=${total_exit_value:.2f}, P&L=${trade_pnl:.2f}")
+                        
+                        # Update metrics
+                        self.update_daily_pnl(trade_pnl)
+                        self.update_trade_metrics(trade_pnl)
+                        
+                        # Update analytics log
+                        trade_id = getattr(trade_positions[0], 'trade_id', None) if trade_positions else None
+                        if trade_id is not None:
+                            for entry in reversed(self.signal_trade_log):
+                                if entry.get('trade_id') == trade_id and entry.get('exit_time') is None:
+                                    entry['exit_time'] = datetime.datetime.now()
+                                    entry['exit_value'] = total_exit_value
+                                    entry['exit_commission'] = exit_commission
+                                    entry['pnl'] = trade_pnl
+                                    entry['exit_reason'] = 'Force Close on Shutdown'
+                                    break
+                        
+                except Exception as e:
+                    self.log(f" CLEANUP ERROR: Failed to process trade {trade_index + 1}: {e}")
+            
+            # Clear active trades
+            self.active_trades.clear()
+            self.trade_entry_times.clear()
+            self.log(f" CLEANUP COMPLETE: All positions force-closed")
         
         # Send system stop alert to Telegram (disabled for live/paper - handled by MultiAccountTelegramManager)
         if not suppress_logging and self.mode == 'backtest':

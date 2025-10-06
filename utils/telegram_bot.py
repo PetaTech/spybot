@@ -179,8 +179,18 @@ class TelegramNotifier:
         """.strip()
         
         if status_data['status'] == 'stopped':
-            message += f"\n💰 Final P&L: ${status_data.get('final_pnl', 0):+.2f}"
+            total_pnl = status_data.get('total_pnl', 0)
+            completed_pnl = status_data.get('completed_pnl', 0)
+            unclosed_pnl = status_data.get('unclosed_pnl', 0)
+            unclosed_positions = status_data.get('unclosed_positions', 0)
+            
+            message += f"\n💰 Final P&L: ${total_pnl:+.2f}"
             message += f"\n🎲 Total Trades: {status_data.get('total_trades', 0)}"
+            
+            if unclosed_positions > 0:
+                message += f"\n📊 Completed P&L: ${completed_pnl:+.2f}"
+                message += f"\n⏳ Unclosed P&L: ${unclosed_pnl:+.2f}"
+                message += f"\n🔄 Unclosed Positions: {unclosed_positions}"
             
         return self.send_message(message)
 
