@@ -67,6 +67,13 @@ class SharedDataProvider:
         self.polling_interval = 1  # 1 second
         self.max_queue_size = 100
         self.connection_timeout = 10
+        
+        # Option chain caching for synchronized option selection across accounts
+        self.option_chain_cache = {}  # Key: "symbol_expiration" -> Value: (dataframe, timestamp)
+        self.cache_duration = 5  # Cache option chains for 5 seconds
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.cache_lock = threading.Lock()  # Thread safety for concurrent access
 
     def test_connection(self) -> bool:
         """Test connection to data source account"""
@@ -181,8 +188,12 @@ class SharedDataProvider:
 
                 # Debug logging every 60 seconds
                 if self.data_count % 60 == 0:
+                    active_subs = len([s for s in self.subscribers if s is not None])
+                    total_cache_requests = self.cache_hits + self.cache_misses
+                    hit_rate = (self.cache_hits / total_cache_requests * 100) if total_cache_requests > 0 else 0
                     print(f"📊 SharedDataProvider: {self.data_count} data points collected, "
-                          f"{len([s for s in self.subscribers if s is not None])} active subscribers")
+                          f"{active_subs} active subscribers, "
+                          f"Cache: {self.cache_hits}/{total_cache_requests} hits ({hit_rate:.0f}%)")
 
                 # Wait for next poll
                 time.sleep(self.polling_interval)
@@ -233,8 +244,10 @@ class SharedDataProvider:
         return self.latest_data
 
     def get_stats(self) -> Dict:
-        """Get provider statistics"""
+        """Get provider statistics including cache performance"""
         active_subscribers = len([s for s in self.subscribers if s is not None])
+        total_cache_requests = self.cache_hits + self.cache_misses
+        cache_hit_rate = (self.cache_hits / total_cache_requests * 100) if total_cache_requests > 0 else 0
 
         return {
             'running': self.running,
@@ -244,7 +257,11 @@ class SharedDataProvider:
             'last_error_time': self.last_error_time,
             'active_subscribers': active_subscribers,
             'latest_data_time': self.latest_data.timestamp if self.latest_data else None,
-            'queue_sizes': [q.qsize() for q in self.subscriber_queues]
+            'queue_sizes': [q.qsize() for q in self.subscriber_queues],
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'cache_hit_rate': f"{cache_hit_rate:.1f}%",
+            'cached_chains': len(self.option_chain_cache)
         }
 
     def health_check(self) -> bool:
@@ -283,16 +300,95 @@ class SharedDataProvider:
                 return False
 
         return True
+    
+    def clear_option_chain_cache(self):
+        """Clear the option chain cache (useful for debugging or forced refresh)"""
+        with self.cache_lock:
+            cache_size = len(self.option_chain_cache)
+            self.option_chain_cache.clear()
+            print(f"[CACHE] Cleared {cache_size} cached option chains")
+    
+    def get_cache_stats(self) -> Dict:
+        """Get detailed cache statistics (thread-safe)"""
+        with self.cache_lock:
+            total_requests = self.cache_hits + self.cache_misses
+            hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
+            
+            return {
+                'cache_hits': self.cache_hits,
+                'cache_misses': self.cache_misses,
+                'total_requests': total_requests,
+                'hit_rate': f"{hit_rate:.1f}%",
+                'cached_entries': len(self.option_chain_cache),
+                'cache_duration': self.cache_duration
+            }
 
     # === Options Chain Access ===
     def get_option_chain(self, symbol: str, expiration: str, current_time: datetime.datetime):
-        """Fetch option chain for given symbol/expiration using Tradier API.
-
-        Note: Delegates to utils.tradier_api which uses the credentials set for this data source.
+        """Fetch option chain for given symbol/expiration using Tradier API with caching.
+        
+        Caching ensures all accounts receive identical option chains when processing
+        the same signal, enabling consistent option selection across all accounts.
+        
+        Thread-safe: Uses lock to prevent race conditions when multiple accounts
+        fetch option chains simultaneously.
+        
+        Args:
+            symbol: Symbol to fetch options for (e.g., 'SPY')
+            expiration: Expiration date in YYYY-MM-DD format
+            current_time: Current market time (used for cache validation)
+            
+        Returns:
+            DataFrame with option chain data or empty DataFrame on error
         """
+        cache_key = f"{symbol}_{expiration}"
+        now = time.time()
+        
+        # Thread-safe cache access
+        with self.cache_lock:
+            # Check cache first
+            if cache_key in self.option_chain_cache:
+                cached_df, cache_timestamp = self.option_chain_cache[cache_key]
+                cache_age = now - cache_timestamp
+                
+                if cache_age < self.cache_duration:
+                    self.cache_hits += 1
+                    print(f"[CACHE HIT] Option chain for {symbol} {expiration} (age: {cache_age:.2f}s, hits: {self.cache_hits})")
+                    return cached_df.copy()  # Return copy to prevent modification
+            
+            # Cache miss - increment counter inside lock
+            self.cache_misses += 1
+            print(f"[CACHE MISS] Fetching fresh option chain for {symbol} {expiration} (misses: {self.cache_misses})")
+        
+        # Fetch outside lock to avoid blocking other threads during API call
         try:
-            import pandas as pd  # ensure DataFrame type is available to callers
-            return get_option_chain(symbol, expiration)
+            import pandas as pd
+            df = get_option_chain(symbol, expiration)
+            
+            # Store in cache (thread-safe)
+            with self.cache_lock:
+                # Double-check: another thread might have fetched while we were waiting
+                if cache_key in self.option_chain_cache:
+                    cached_df, cache_timestamp = self.option_chain_cache[cache_key]
+                    cache_age = now - cache_timestamp
+                    if cache_age < self.cache_duration:
+                        # Another thread already cached this, use theirs
+                        print(f"[CACHE] Another thread cached {symbol} {expiration} while we were fetching")
+                        return cached_df.copy()
+                
+                # Store our fetched data
+                self.option_chain_cache[cache_key] = (df, now)
+                
+                # Clean up old cache entries (keep only last 10 entries)
+                if len(self.option_chain_cache) > 10:
+                    # Remove oldest entry
+                    oldest_key = min(self.option_chain_cache.keys(), 
+                                   key=lambda k: self.option_chain_cache[k][1])
+                    del self.option_chain_cache[oldest_key]
+                    print(f"[CACHE CLEANUP] Removed old cache entry: {oldest_key}")
+            
+            return df
+            
         except Exception as e:
             print(f"❌ SharedDataProvider.get_option_chain error: {e}")
             # Return empty DataFrame on failure to keep engine logic robust
