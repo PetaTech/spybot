@@ -28,7 +28,7 @@ TIMEZONE = 'America/New_York'
 
 # === Market Timing Parameters (Theta Decay Management) ===
 MARKET_OPEN_BUFFER_MINUTES = 15  # Wait 15 minutes after market open before trading
-MARKET_CLOSE_BUFFER_MINUTES = 0  # Force exit 0 minute ago before market close
+MARKET_CLOSE_BUFFER_MINUTES = 30  # Force exit 30 minutes before market close (for 0DTE options)
 EARLY_SIGNAL_COOLDOWN_MINUTES = 30  # Cooldown period if signal occurs before open buffer
 
 # === VIX-Based Volatility Strategy Parameters ===
