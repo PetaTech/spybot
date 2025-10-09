@@ -388,3 +388,86 @@ class AccountManager:
     def get_telegram_config(self) -> Optional[Dict]:
         """Get telegram configuration for this account"""
         return self.account_config.get('telegram')
+
+    def can_trade(self, current_time: datetime.datetime) -> bool:
+        """
+        Check if this account can trade based on its state
+
+        Args:
+            current_time: Current market time
+
+        Returns:
+            bool: True if account can trade, False otherwise
+        """
+        engine = self.trading_engine
+
+        # Check if account is enabled and running
+        if not self.enabled or not self.is_running:
+            return False
+
+        # Check cooldown period
+        if engine.last_trade_time is not None:
+            cooldown = self.strategy_config.get('COOLDOWN_PERIOD', 20 * 60)
+            seconds_since_last_trade = (current_time - engine.last_trade_time).total_seconds()
+            if seconds_since_last_trade < cooldown:
+                return False
+
+        # Check daily trade limit
+        max_daily_trades = self.strategy_config.get('MAX_DAILY_TRADES', 5)
+        if engine.daily_trades >= max_daily_trades:
+            return False
+
+        # Check daily loss limit
+        max_daily_loss = self.strategy_config.get('MAX_DAILY_LOSS', 1000)
+        if engine.daily_pnl <= -max_daily_loss:
+            return False
+
+        # Check emergency stop loss
+        emergency_stop_loss = self.strategy_config.get('EMERGENCY_STOP_LOSS', 2000)
+        if engine.total_pnl <= -emergency_stop_loss:
+            return False
+
+        return True
+
+    def get_cannot_trade_reason(self, current_time: datetime.datetime) -> str:
+        """
+        Get reason why account cannot trade
+
+        Args:
+            current_time: Current market time
+
+        Returns:
+            str: Reason why account cannot trade
+        """
+        engine = self.trading_engine
+
+        if not self.enabled:
+            return "Account disabled"
+
+        if not self.is_running:
+            return "Account not running"
+
+        # Check cooldown
+        if engine.last_trade_time is not None:
+            cooldown = self.strategy_config.get('COOLDOWN_PERIOD', 20 * 60)
+            seconds_since_last_trade = (current_time - engine.last_trade_time).total_seconds()
+            if seconds_since_last_trade < cooldown:
+                remaining = cooldown - seconds_since_last_trade
+                return f"In cooldown ({remaining:.0f}s remaining)"
+
+        # Check daily trade limit
+        max_daily_trades = self.strategy_config.get('MAX_DAILY_TRADES', 5)
+        if engine.daily_trades >= max_daily_trades:
+            return f"Max daily trades reached ({engine.daily_trades}/{max_daily_trades})"
+
+        # Check daily loss limit
+        max_daily_loss = self.strategy_config.get('MAX_DAILY_LOSS', 1000)
+        if engine.daily_pnl <= -max_daily_loss:
+            return f"Max daily loss reached (${engine.daily_pnl:.2f}/-${max_daily_loss})"
+
+        # Check emergency stop loss
+        emergency_stop_loss = self.strategy_config.get('EMERGENCY_STOP_LOSS', 2000)
+        if engine.total_pnl <= -emergency_stop_loss:
+            return f"Emergency stop loss triggered (${engine.total_pnl:.2f}/-${emergency_stop_loss})"
+
+        return "Ready to trade"

@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core.shared_data_provider import SharedDataProvider, MarketData
 from core.account_manager import AccountManager
+from core.trading_coordinator import TradingCoordinator
 from utils.multi_account_telegram import MultiAccountTelegramManager
 from config.accounts import (
     ACCOUNTS, get_enabled_accounts, get_data_source_account,
@@ -45,6 +46,7 @@ class MultiAccountManager:
         # Core components
         self.shared_data_provider: Optional[SharedDataProvider] = None
         self.account_managers: Dict[str, AccountManager] = {}
+        self.trading_coordinator: Optional[TradingCoordinator] = None
         self.telegram_manager = MultiAccountTelegramManager()
 
         # Threading
@@ -82,6 +84,10 @@ class MultiAccountManager:
 
             # Initialize telegram notifications
             self._initialize_telegram()
+
+            # Initialize trading coordinator
+            if not self._initialize_coordinator():
+                return False
 
             print("✅ Multi-Account Manager initialized successfully")
             return True
@@ -176,16 +182,10 @@ class MultiAccountManager:
                     except Exception as e:
                         print(f"     ❌ Failed to attach data provider to {account_manager.account_name}: {e}")
 
-                    # Register with shared data provider
-                    # Use a closure to capture the account_key by value
-                    def create_callback(acc_key):
-                        return lambda data: self._process_account_data(acc_key, data)
-                    
-                    subscriber_id = self.shared_data_provider.add_subscriber(
-                        create_callback(account_key)
-                    )
+                    # NOTE: No longer using callbacks - TradingCoordinator handles signal detection and execution
+                    # Old callback system removed in favor of centralized coordinator
 
-                    print(f"     ✅ {account_manager.account_name} initialized (subscriber #{subscriber_id})")
+                    print(f"     ✅ {account_manager.account_name} initialized")
 
                 except Exception as e:
                     account_ref = f"Account #{account_config.get('account_index', 'Unknown')}"
@@ -201,6 +201,24 @@ class MultiAccountManager:
 
         except Exception as e:
             print(f"❌ Failed to initialize account managers: {e}")
+            return False
+
+    def _initialize_coordinator(self) -> bool:
+        """Initialize trading coordinator"""
+        try:
+            print(f"\n🎯 Initializing Trading Coordinator...")
+
+            # Create coordinator with data provider and account managers
+            self.trading_coordinator = TradingCoordinator(
+                data_provider=self.shared_data_provider,
+                account_managers=self.account_managers
+            )
+
+            print(f"✅ Trading Coordinator initialized")
+            return True
+
+        except Exception as e:
+            print(f"❌ Failed to initialize coordinator: {e}")
             return False
 
     def _initialize_telegram(self):
@@ -227,18 +245,21 @@ class MultiAccountManager:
             self.start_time = datetime.datetime.now()
             self.running = True
 
-            # Start shared data provider
+            # Start shared data provider (for data collection only)
             self.shared_data_provider.start()
 
-            # Start all account managers SIMULTANEOUSLY (no staggered startup)
-            # This ensures all accounts have identical trading behavior
-            print(f"   Starting all {len(self.account_managers)} accounts simultaneously...")
+            # Start all account managers
+            print(f"   Starting all {len(self.account_managers)} accounts...")
             for account_name, account_manager in self.account_managers.items():
                 if account_manager.start():
                     print(f"   ✅ {account_name} started")
                 else:
                     print(f"   ❌ {account_name} failed to start")
-            
+
+            # Start coordinator (handles signal detection and parallel order execution)
+            print(f"🎯 Starting Trading Coordinator...")
+            self.trading_coordinator.start()
+
             # Send startup notifications after all accounts are started
             for account_name, account_manager in self.account_managers.items():
                 if account_manager.is_running:
@@ -274,7 +295,12 @@ class MultiAccountManager:
         print(f"\n🛑 Stopping Multi-Account Trading...")
         self.running = False
 
-        # Stop shared data provider FIRST to prevent new data processing (non-blocking)
+        # Stop trading coordinator first
+        if self.trading_coordinator:
+            print("   🛑 Stopping Trading Coordinator...")
+            self.trading_coordinator.stop()
+
+        # Stop shared data provider
         if self.shared_data_provider and getattr(self.shared_data_provider, 'running', False):
             print("   🛑 Stopping data provider...")
             self.shared_data_provider.running = False  # Signal to stop, don't wait

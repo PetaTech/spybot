@@ -154,6 +154,25 @@ class SharedDataProvider:
             try:
                 # Get current data
                 now = datetime.datetime.now(tz=tz.gettz('America/New_York'))
+
+                # Check if market is open (Monday-Friday, 9:30 AM - 4:00 PM ET)
+                current_time = now.time()
+                is_weekday = now.weekday() < 5  # Monday=0, Friday=4
+                market_open = datetime.time(9, 30)
+                market_close = datetime.time(16, 0)
+                is_market_hours = market_open <= current_time <= market_close
+
+                if not is_weekday or not is_market_hours:
+                    # Market is closed, sleep for 1 minute and check again
+                    if self.data_count == 0:  # Log once at startup
+                        if not is_weekday:
+                            day_name = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][now.weekday()]
+                            print(f"⏸️  Market closed: Today is {day_name}. Waiting for next trading day...")
+                        else:
+                            print(f"⏸️  Market closed: Current time {current_time.strftime('%H:%M')} (market hours: 09:30-16:00 ET). Waiting...")
+                    time.sleep(60)
+                    continue
+
                 ohlc_data = get_spy_ohlc()
 
                 if ohlc_data is None:
