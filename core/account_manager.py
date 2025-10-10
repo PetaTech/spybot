@@ -215,59 +215,6 @@ class AccountManager:
         if hasattr(self.trading_engine, 'finish'):
             self.trading_engine.finish()
 
-    def process_market_data(self, market_data: MarketData) -> Dict:
-        """
-        Process incoming market data for this account
-        Each account processes the same data independently for signal generation
-
-        Args:
-            market_data: Shared market data from SharedDataProvider
-
-        Returns:
-            Dict: Processing result from trading engine
-        """
-        if not self.is_running or not self.enabled:
-            return {'action': 'skipped', 'reason': 'account_disabled'}
-
-        try:
-            self.market_data_count += 1
-
-            # Process through trading engine
-            result = self.trading_engine.process_row(
-                current_time=market_data.timestamp,
-                symbol=market_data.symbol,
-                open=market_data.open,
-                high=market_data.high,
-                low=market_data.low,
-                close=market_data.close,
-                volume=market_data.volume
-            )
-
-            # Track account-specific events
-            if result.get('signal_detected'):
-                self.last_signal_time = market_data.timestamp
-
-            if result.get('action') in ['entry', 'exit']:
-                self.last_trade_time = market_data.timestamp
-
-            # Add account context to result
-            result.update({
-                'account_name': self.account_name,
-                'account_mode': self.mode,
-                'market_data_count': self.market_data_count
-            })
-
-            return result
-
-        except Exception as e:
-            error_msg = f"Error processing market data: {e}"
-            self.log(error_msg, level='ERROR')
-            return {
-                'action': 'error',
-                'error': str(e),
-                'account_name': self.account_name
-            }
-
     def get_status(self) -> Dict:
         """Get current account status"""
         status = {
@@ -324,46 +271,6 @@ class AccountManager:
             timestamp = datetime.datetime.now().strftime('%H:%M:%S')
             print(f"[{timestamp}] [{self.account_name}] {level}: {message}")
 
-    def health_check(self) -> bool:
-        """Check if account manager is healthy"""
-        if not self.enabled or not self.is_running:
-            return False
-
-        # During market hours, check if we've processed data recently
-        # Outside market hours, always pass health check
-        import datetime
-        from dateutil import tz
-
-        now = datetime.datetime.now(tz=tz.gettz('America/New_York'))
-        market_open = datetime.time(9, 30)
-        market_close = datetime.time(16, 0)
-        current_time = now.time()
-
-        # Check if market is open (Monday-Friday, 9:30 AM - 4:00 PM ET)
-        is_weekday = now.weekday() < 5  # Monday=0, Friday=4
-        is_market_hours = market_open <= current_time <= market_close
-
-        if is_weekday and is_market_hours:
-            # Market is open, require data processing
-            if self.market_data_count == 0:
-                return False
-
-        # Outside market hours or weekend, health check passes
-        return True
-
-    def restart(self):
-        """Restart the account manager"""
-        self.log("Restarting account manager")
-        self.stop_for_restart()
-        return self.start()
-
-    def stop_for_restart(self):
-        """Stop the account manager for restart (suppresses final results logging)"""
-        self.is_running = False
-
-        # Finish trading engine without logging final results
-        if hasattr(self.trading_engine, 'finish'):
-            self.trading_engine.finish(suppress_logging=True)
 
     def update_config(self, new_overrides: Dict):
         """

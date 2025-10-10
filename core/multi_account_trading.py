@@ -57,8 +57,6 @@ class MultiAccountManager:
 
         # Statistics
         self.start_time = None
-        self.total_market_data_processed = 0
-        self.account_restart_counts = {}
 
         # Global risk tracking
         self.global_daily_pnl = 0.0
@@ -163,7 +161,6 @@ class MultiAccountManager:
                     # Use account_name from AccountManager (fetched from API)
                     account_key = account_manager.account_name
                     self.account_managers[account_key] = account_manager
-                    self.account_restart_counts[account_key] = 0
 
                     # Initialize VIX immediately for each engine before any data processing
                     try:
@@ -349,107 +346,21 @@ class MultiAccountManager:
 
         print("✅ Multi-Account Trading stopped")
 
-    def _process_account_data(self, account_name: str, market_data: MarketData):
-        """Process market data for a specific account (called by shared data provider)"""
-        try:
-            account_manager = self.account_managers.get(account_name)
-            if not account_manager:
-                return
-
-            # Process data through account manager
-            result = account_manager.process_market_data(market_data)
-
-            # Handle telegram notifications
-            self._handle_notifications(account_name, result)
-
-            # Update global statistics
-            self.total_market_data_processed += 1
-
-
-        except Exception as e:
-            print(f"❌ Error processing data for {account_name}: {e}")
-            self.telegram_manager.send_error_alert(account_name, str(e))
-
-    def _handle_notifications(self, account_name: str, result: Dict):
-        """Handle telegram notifications based on trading results"""
-        action = result.get('action', '')
-        print(f"[NOTIF DEBUG] Handling notifications for {account_name}, action={action}, signal_detected={result.get('signal_detected', False)}")
-
-        # Handle signal alert (don't let it block other notifications)
-        if result.get('signal_detected'):
-            try:
-                print(f"[NOTIF DEBUG] Sending signal alert for {account_name}")
-                self.telegram_manager.send_signal_alert(account_name, result)
-            except Exception as e:
-                print(f"❌ Error sending signal alert for {account_name}: {e}")
-                import traceback
-                traceback.print_exc()
-
-        # Handle entry alert
-        if action == 'entry':
-            try:
-                print(f"[NOTIF DEBUG] Sending entry alert for {account_name}")
-                success = self.telegram_manager.send_entry_alert(account_name, result)
-                print(f"[NOTIF DEBUG] Entry alert sent: {success}")
-            except Exception as e:
-                print(f"❌ Error sending entry alert for {account_name}: {e}")
-                import traceback
-                traceback.print_exc()
-
-        # Handle exit alert
-        elif action == 'exit':
-            try:
-                print(f"[NOTIF DEBUG] Sending exit alert for {account_name}")
-                # Use exit_data if available, otherwise use result
-                exit_data = result.get('exit_data', result)
-                self.telegram_manager.send_exit_alert(account_name, exit_data)
-            except Exception as e:
-                print(f"❌ Error sending exit alert for {account_name}: {e}")
-                import traceback
-                traceback.print_exc()
-
-        # Handle error alert
-        elif action == 'error':
-            try:
-                print(f"[NOTIF DEBUG] Sending error alert for {account_name}")
-                error_msg = result.get('error', 'Unknown error')
-                self.telegram_manager.send_error_alert(account_name, error_msg)
-            except Exception as e:
-                print(f"❌ Error sending error alert for {account_name}: {e}")
-                import traceback
-                traceback.print_exc()
-
     def _monitoring_loop(self):
-        """Monitoring loop (runs in separate thread)"""
-        check_interval = ORCHESTRATION.get('health_check_interval', 30)
-        auto_restart = ORCHESTRATION.get('auto_restart_failed_accounts', True)
-        max_restart_attempts = ORCHESTRATION.get('max_account_restart_attempts', 3)
+        """Monitoring loop - simplified for single-threaded coordinator"""
+        check_interval = 60  # Check every minute
 
-        print(f"🔍 Monitoring started (check every {check_interval}s)")
-        
-        # Give accounts grace period to start and process initial data
-        startup_grace_period = 10  # Wait 10 seconds before first health check
-        print(f"   Waiting {startup_grace_period}s grace period for accounts to initialize...")
-        time.sleep(startup_grace_period)
+        print(f"🔍 Monitoring started (status every 10 minutes)")
 
         while self.running:
             try:
-                # Check account health
-                for account_name, account_manager in self.account_managers.items():
-                    if not account_manager.health_check():
-                        print(f"⚠️ Health check failed for {account_name}")
-
-                        if auto_restart and self.account_restart_counts[account_name] < max_restart_attempts:
-                            print(f"🔄 Attempting to restart {account_name}")
-                            if account_manager.restart():
-                                self.account_restart_counts[account_name] += 1
-                                print(f"✅ {account_name} restarted successfully")
-                            else:
-                                print(f"❌ Failed to restart {account_name}")
-
-                # Check shared data provider health
+                # Check data provider health (has separate threads)
                 if not self.shared_data_provider.health_check():
                     print(f"⚠️ Shared data provider health check failed")
+
+                # Check if coordinator is still running
+                if self.trading_coordinator and not self.trading_coordinator.running:
+                    print(f"❌ Trading coordinator stopped unexpectedly!")
 
                 # Print status every 10 minutes
                 if hasattr(self, '_last_status_print'):
@@ -470,11 +381,15 @@ class MultiAccountManager:
         """Print current status of all accounts"""
         print(f"\n📊 Multi-Account Status Report")
         print(f"   Runtime: {datetime.datetime.now() - self.start_time}")
-        print(f"   Data processed: {self.total_market_data_processed:,}")
 
         # Data provider stats
         data_stats = self.shared_data_provider.get_stats()
         print(f"   Data source: {data_stats['data_source']} ({data_stats['data_points_collected']} points)")
+
+        # Coordinator stats
+        if self.trading_coordinator:
+            coord_stats = self.trading_coordinator.get_stats()
+            print(f"   Coordinator: {coord_stats['total_signals']} signals detected")
 
         # Account stats
         print(f"   Account statuses:")
@@ -517,11 +432,10 @@ class MultiAccountManager:
             'running': self.running,
             'start_time': self.start_time,
             'total_accounts': len(self.account_managers),
-            'total_market_data_processed': self.total_market_data_processed,
             'data_provider_stats': self.shared_data_provider.get_stats() if self.shared_data_provider else None,
+            'coordinator_stats': self.trading_coordinator.get_stats() if self.trading_coordinator else None,
             'telegram_stats': self.telegram_manager.get_stats(),
-            'account_statuses': account_statuses,
-            'restart_counts': self.account_restart_counts
+            'account_statuses': account_statuses
         }
 
     def run_forever(self):

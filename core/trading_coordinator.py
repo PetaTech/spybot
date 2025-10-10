@@ -169,6 +169,9 @@ class TradingCoordinator:
         try:
             # Check daily limits for all accounts (includes daily reset logic)
             for account_mgr in self.account_managers.values():
+                # Increment market data count so health checks pass
+                account_mgr.market_data_count += 1
+
                 engine = account_mgr.trading_engine
                 if hasattr(engine, 'check_daily_limits'):
                     engine.check_daily_limits(market_data.timestamp)
