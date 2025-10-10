@@ -1,13 +1,12 @@
 """
 Shared Data Provider for Multi-Account Trading
-Single data feed broadcasted to multiple account instances
+Single data feed shared across all accounts via coordinator
 """
 
 import time
 import datetime
 import threading
-from typing import Dict, List, Optional, Callable
-from queue import Queue, Empty
+from typing import Dict, Optional
 from dateutil import tz
 from dataclasses import dataclass
 from utils.tradier_api import set_api_credentials, get_spy_ohlc, test_connection, get_option_chain
@@ -26,8 +25,8 @@ class MarketData:
 
 class SharedDataProvider:
     """
-    Single data provider that broadcasts market data to multiple account managers
-    Uses one Tradier account for data feed, distributes to all trading accounts
+    Single data provider that collects market data for all accounts
+    Uses one Tradier account for data feed, coordinator pulls via get_latest_data()
     """
 
     def __init__(self, data_source_account: Dict):
@@ -48,14 +47,9 @@ class SharedDataProvider:
         # Set API credentials for data source
         set_api_credentials(self.api_url, self.access_token, self.account_id)
 
-        # Data broadcasting
-        self.subscribers: List[Callable[[MarketData], None]] = []
-        self.subscriber_queues: List[Queue] = []
-
         # Threading
         self.running = False
         self.data_thread = None
-        self.broadcast_thread = None
 
         # Data state
         self.latest_data: Optional[MarketData] = None
@@ -83,30 +77,6 @@ class SharedDataProvider:
             print(f"❌ SharedDataProvider connection test failed: {e}")
             return False
 
-    def add_subscriber(self, callback: Callable[[MarketData], None]) -> int:
-        """
-        Add a subscriber callback function
-
-        Args:
-            callback: Function to call with new market data
-
-        Returns:
-            subscriber_id: ID for this subscriber
-        """
-        self.subscribers.append(callback)
-        queue = Queue(maxsize=self.max_queue_size)
-        self.subscriber_queues.append(queue)
-
-        subscriber_id = len(self.subscribers) - 1
-        print(f"📡 Added subscriber #{subscriber_id} to SharedDataProvider")
-        return subscriber_id
-
-    def remove_subscriber(self, subscriber_id: int):
-        """Remove a subscriber"""
-        if 0 <= subscriber_id < len(self.subscribers):
-            self.subscribers[subscriber_id] = None
-            print(f"📡 Removed subscriber #{subscriber_id} from SharedDataProvider")
-
     def start(self):
         """Start the shared data provider"""
         if self.running:
@@ -125,10 +95,6 @@ class SharedDataProvider:
         self.data_thread = threading.Thread(target=self._data_collection_loop, daemon=True)
         self.data_thread.start()
 
-        # Start broadcast thread
-        self.broadcast_thread = threading.Thread(target=self._broadcast_loop, daemon=True)
-        self.broadcast_thread.start()
-
         print(f"✅ SharedDataProvider started successfully")
 
     def stop(self):
@@ -141,8 +107,6 @@ class SharedDataProvider:
 
         if self.data_thread:
             self.data_thread.join(timeout=5)
-        if self.broadcast_thread:
-            self.broadcast_thread.join(timeout=5)
 
         print("✅ SharedDataProvider stopped")
 
@@ -197,21 +161,11 @@ class SharedDataProvider:
                 self.latest_data = market_data
                 self.data_count += 1
 
-                # Queue for broadcasting
-                for queue in self.subscriber_queues:
-                    try:
-                        if not queue.full():
-                            queue.put_nowait(market_data)
-                    except Exception as e:
-                        print(f"⚠️ Failed to queue data for subscriber: {e}")
-
                 # Debug logging every 60 seconds
                 if self.data_count % 60 == 0:
-                    active_subs = len([s for s in self.subscribers if s is not None])
                     total_cache_requests = self.cache_hits + self.cache_misses
                     hit_rate = (self.cache_hits / total_cache_requests * 100) if total_cache_requests > 0 else 0
                     print(f"📊 SharedDataProvider: {self.data_count} data points collected, "
-                          f"{active_subs} active subscribers, "
                           f"Cache: {self.cache_hits}/{total_cache_requests} hits ({hit_rate:.0f}%)")
 
                 # Wait for next poll
@@ -227,44 +181,12 @@ class SharedDataProvider:
         
         print(f"⚠️ Data collection loop EXITED for {self.source_name}! running={self.running}")
 
-    def _broadcast_loop(self):
-        """Broadcast loop to send data to subscribers (runs in separate thread)"""
-        print("📡 Broadcast loop started")
-
-        while self.running:
-            try:
-                # Process queued data for each subscriber
-                for i, (callback, queue) in enumerate(zip(self.subscribers, self.subscriber_queues)):
-                    if callback is None:
-                        continue
-
-                    try:
-                        # Get data from queue (non-blocking)
-                        market_data = queue.get_nowait()
-
-                        # Call subscriber callback
-                        callback(market_data)
-
-                    except Empty:
-                        # No data in queue for this subscriber
-                        continue
-                    except Exception as e:
-                        print(f"❌ Error calling subscriber #{i} callback: {e}")
-
-                # Small delay to prevent CPU spinning
-                time.sleep(0.01)  # 10ms
-
-            except Exception as e:
-                print(f"❌ Error in broadcast loop: {e}")
-                time.sleep(1)
-
     def get_latest_data(self) -> Optional[MarketData]:
         """Get the latest market data (synchronous)"""
         return self.latest_data
 
     def get_stats(self) -> Dict:
         """Get provider statistics including cache performance"""
-        active_subscribers = len([s for s in self.subscribers if s is not None])
         total_cache_requests = self.cache_hits + self.cache_misses
         cache_hit_rate = (self.cache_hits / total_cache_requests * 100) if total_cache_requests > 0 else 0
 
@@ -274,9 +196,7 @@ class SharedDataProvider:
             'data_points_collected': self.data_count,
             'error_count': self.error_count,
             'last_error_time': self.last_error_time,
-            'active_subscribers': active_subscribers,
             'latest_data_time': self.latest_data.timestamp if self.latest_data else None,
-            'queue_sizes': [q.qsize() for q in self.subscriber_queues],
             'cache_hits': self.cache_hits,
             'cache_misses': self.cache_misses,
             'cache_hit_rate': f"{cache_hit_rate:.1f}%",
@@ -289,13 +209,9 @@ class SharedDataProvider:
             print(f"[HEALTH] Data provider not running")
             return False
 
-        # Check if threads are alive
+        # Check if data thread is alive
         if self.data_thread and not self.data_thread.is_alive():
             print(f"[HEALTH] ❌ Data collection thread is DEAD!")
-            return False
-        
-        if self.broadcast_thread and not self.broadcast_thread.is_alive():
-            print(f"[HEALTH] ❌ Broadcast thread is DEAD!")
             return False
 
         # Check if we've received data recently (be more lenient - allow up to 5 minutes gap)
