@@ -187,7 +187,16 @@ class MultiAccountManager:
                 except Exception as e:
                     account_ref = f"Account #{account_config.get('account_index', 'Unknown')}"
                     print(f"     ❌ Failed to initialize {account_ref}: {e}")
-                    continue
+                    
+                    # Check if it's a credential problem
+                    if "credential problems" in str(e).lower() or "invalid credentials" in str(e).lower():
+                        print(f"🚨 CRITICAL: {account_ref} has credential problems!")
+                        print(f"   Stopping entire bot for security reasons.")
+                        print(f"   Please fix credentials in config/accounts.py")
+                        return False
+                    else:
+                        print(f"   ⚠️ Other initialization error - stopping bot")
+                        return False
 
             if not self.account_managers:
                 print("❌ No account managers initialized")

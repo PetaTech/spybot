@@ -39,6 +39,13 @@ class AccountManager:
 
         # Fetch account name from Tradier API
         self.account_name = self._fetch_account_name()
+        
+        # Simple check: if name is just account ID, it means credentials failed
+        if self.account_name.startswith(f"Account {self.account_id}"):
+            print(f"❌ CREDENTIAL PROBLEM for Account #{self.account_index}")
+            print(f"   Cannot fetch account name - credentials may be invalid")
+            print(f"   Account will be skipped for security")
+            raise ValueError(f"Account #{self.account_index} has credential problems - cannot proceed")
 
         # Set up logging for this account
         self._setup_logging()
