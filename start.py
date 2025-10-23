@@ -8,11 +8,19 @@ Usage: python start.py <mode>
 import sys
 import os
 
-# Fix Windows encoding for emojis
+# Fix Windows encoding for emojis - must be done BEFORE any imports that print
 if sys.platform == "win32":
-    import codecs
-    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
-    sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    # Try to reconfigure stdout/stderr for UTF-8
+    try:
+        import codecs
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except AttributeError:
+        # Python < 3.7 fallback
+        import codecs
+        sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+        sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
 from core.multi_account_trading import main
 

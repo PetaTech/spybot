@@ -57,8 +57,6 @@ class TradingCoordinator:
         engine = first_account.trading_engine
 
         # Import strategy parameters
-        self.move_threshold_min = getattr(engine, 'move_threshold_min_points', 3.0)
-        self.move_threshold_max = getattr(engine, 'move_threshold_max_points', 20.0)
         self.price_window_seconds = getattr(engine, 'price_window_seconds', 30 * 60)
         self.cooldown_period = getattr(engine, 'cooldown_period', 20 * 60)
         self.market_open = getattr(engine, 'market_open', '09:30')
@@ -67,8 +65,20 @@ class TradingCoordinator:
         self.market_close_buffer_minutes = getattr(engine, 'market_close_buffer_minutes', 15)
         self.max_entry_time = getattr(engine, 'max_entry_time', datetime.time(15, 0))
 
+        # VIX-based adaptive threshold parameters
+        self.vix_threshold = getattr(engine, 'vix_threshold', 25)
+        self.high_vol_move_threshold = getattr(engine, 'high_vol_move_threshold', 2.5)
+        self.low_vol_move_threshold = getattr(engine, 'low_vol_move_threshold', 1.5)
+
+        # VIX state (will be updated dynamically)
+        self._vix_value = None
+        self._vix_regime = None
+        self._vix_last_fetch_time = 0
+        self.move_threshold = self.low_vol_move_threshold  # Default to low vol
+
         print(f"✅ TradingCoordinator initialized with {len(account_managers)} accounts")
-        print(f"   Strategy: Move threshold {self.move_threshold_min}-{self.move_threshold_max} pts, {self.price_window_seconds/60:.0f}min window")
+        print(f"   Strategy: VIX-adaptive thresholds (High vol: {self.high_vol_move_threshold}pts, Low vol: {self.low_vol_move_threshold}pts)")
+        print(f"   Window: {self.price_window_seconds/60:.0f}min, Cooldown: {self.cooldown_period/60:.0f}min")
 
     def start(self):
         """Start the coordinator's main loop"""
@@ -103,8 +113,18 @@ class TradingCoordinator:
         """Main coordination loop - runs in single thread"""
         print("📊 TradingCoordinator main loop started")
 
+        loop_count = 0
+        last_status_time = time.time()
+
         while self.running:
             try:
+                loop_count += 1
+
+                # Print status every 30 seconds
+                if time.time() - last_status_time > 30:
+                    print(f"📊 Coordinator Status: Loop #{loop_count} | Price log size: {len(self.price_log)} | Threshold: {self.move_threshold:.4f}pts")
+                    last_status_time = time.time()
+
                 # 1. Get market data (once)
                 market_data = self.data_provider.get_latest_data()
 
@@ -152,7 +172,7 @@ class TradingCoordinator:
 
     def _update_vix_parameters(self, market_data: MarketData):
         """
-        Update VIX parameters for all accounts
+        Update VIX parameters for all accounts AND coordinator's threshold
         VIX is cached internally (5-minute TTL), so this is efficient
         """
         try:
@@ -161,6 +181,28 @@ class TradingCoordinator:
                 engine = account_mgr.trading_engine
                 if hasattr(engine, '_set_vix_parameters'):
                     engine._set_vix_parameters(force=False, target_datetime=market_data.timestamp)
+
+            # Get updated VIX from first account's engine
+            first_account = next(iter(self.account_managers.values()))
+            engine = first_account.trading_engine
+            vix_value = getattr(engine, '_vix_value', None)
+            vix_regime = getattr(engine, '_vix_regime', 'low_volatility')
+
+            # Update coordinator's own VIX state and threshold
+            if vix_value != self._vix_value or vix_regime != self._vix_regime:
+                old_threshold = self.move_threshold
+                self._vix_value = vix_value
+                self._vix_regime = vix_regime
+
+                # Set threshold based on VIX regime
+                if vix_regime == 'high_volatility':
+                    self.move_threshold = self.high_vol_move_threshold
+                else:
+                    self.move_threshold = self.low_vol_move_threshold
+
+                if old_threshold != self.move_threshold:
+                    print(f"📊 VIX Update: {vix_value:.2f} | Regime: {vix_regime} | Threshold: {old_threshold:.4f} → {self.move_threshold:.4f} pts")
+
         except Exception as e:
             print(f"⚠️ Error updating VIX parameters: {e}")
 
@@ -205,7 +247,18 @@ class TradingCoordinator:
         past_max_entry_time = current_time.time() > self.max_entry_time
 
         # Skip signal detection during buffer periods or past max entry time
-        if in_open_buffer or in_close_buffer or past_max_entry_time:
+        if in_open_buffer:
+            if not hasattr(self, '_last_buffer_warning') or (time.time() - self._last_buffer_warning) > 60:
+                print(f"⏸️  Skipping signals: Market open buffer ({time_since_open:.1f}min < {self.market_open_buffer_minutes}min)")
+                self._last_buffer_warning = time.time()
+            return None
+        if in_close_buffer:
+            print(f"⏸️  Skipping signals: Market close buffer")
+            return None
+        if past_max_entry_time:
+            if not hasattr(self, '_past_max_entry_warned'):
+                print(f"⏸️  Skipping signals: Past max entry time ({current_time.time()} > {self.max_entry_time})")
+                self._past_max_entry_warned = True
             return None
 
         # Check cooldown
@@ -214,89 +267,68 @@ class TradingCoordinator:
             if seconds_since_last_signal < self.cooldown_period:
                 return None
 
-        # Calculate move percentage
+        # Calculate move within window (same as TradingEngine)
         if len(self.price_log) < 2:
             return None
 
-        # Get window high/low
+        # Get window high/low from price log
         window_prices = [p for t, p in self.price_log]
         window_high = max(window_prices)
         window_low = min(window_prices)
 
-        # Calculate move from window high/low
-        move_from_high = ((current_price - window_high) / window_high) * 100
-        move_from_low = ((current_price - window_low) / window_low) * 100
+        # Calculate absolute move within the window (high - low)
+        absolute_move = window_high - window_low
 
-        # Check if price moved above high or below low
-        absolute_move_high = current_price - window_high
-        absolute_move_low = window_low - current_price
+        # Check if movement within window exceeds threshold
+        if absolute_move < self.move_threshold:
+            return None  # No signal - movement too small
 
-        # Detect breakout
-        signal_detected = False
-        move_percent = 0.0
-        absolute_move = 0.0
-        reference_price = current_price
+        # Signal detected! Update tracking
+        self.last_flagged_time = current_time
+        self.total_signals += 1
+        move_percent = (absolute_move / window_low) * 100 if window_low > 0 else 0
+        reference_price = window_low
 
-        # Upward breakout
-        if absolute_move_high > self.move_threshold_min and absolute_move_high < self.move_threshold_max:
-            signal_detected = True
-            move_percent = move_from_high
-            absolute_move = absolute_move_high
-            reference_price = window_high
+        # Get VIX from first account's engine
+        first_account = next(iter(self.account_managers.values()))
+        vix_regime = getattr(first_account.trading_engine, '_vix_regime', 'low_volatility')
+        vix_value = getattr(first_account.trading_engine, '_vix_value', 0.0)
 
-        # Downward breakout
-        elif absolute_move_low > self.move_threshold_min and absolute_move_low < self.move_threshold_max:
-            signal_detected = True
-            move_percent = -move_from_low
-            absolute_move = absolute_move_low
-            reference_price = window_low
+        print(f"🎯 SIGNAL DETECTED: {market_data.symbol} ${current_price:.2f} | Move: {move_percent:.2f}% ({absolute_move:.4f}pts) | Threshold: {self.move_threshold:.4f}pts | VIX Regime: {vix_regime}")
 
-        if signal_detected:
-            self.last_flagged_time = current_time
-            self.total_signals += 1
+        # Send signal alert to all accounts
+        signal_data = {
+            'detection_time': current_time,
+            'condition': f"Move {move_percent:.2f}% in window, signal detected",
+            'market_price': current_price,
+            'move_percent': move_percent,
+            'move_points': absolute_move,
+            'vix_regime': vix_regime,
+            'vix_value': vix_value,
+            'active_trades': 0,  # Will be updated per account
+            'symbol': market_data.symbol
+        }
 
-            # Get VIX from first account's engine
-            first_account = next(iter(self.account_managers.values()))
-            vix_regime = getattr(first_account.trading_engine, '_vix_regime', 'low_volatility')
-            vix_value = getattr(first_account.trading_engine, '_vix_value', 0.0)
+        # Send signal alert to each account
+        for account_name, account_mgr in self.account_managers.items():
+            try:
+                # Update active trades count for this account
+                signal_data['active_trades'] = len(account_mgr.trading_engine.active_trades)
+                account_mgr.trading_engine._send_signal_alert(signal_data)
+            except Exception as e:
+                print(f"❌ Error sending signal alert to {account_name}: {e}")
 
-            print(f"🎯 SIGNAL DETECTED: {market_data.symbol} ${current_price:.2f} | Move: {move_percent:.2f}% ({absolute_move:.2f}pts)")
-
-            # Send signal alert to all accounts
-            signal_data = {
-                'detection_time': current_time,
-                'condition': f"Move {move_percent:.2f}% in window, signal detected",
-                'market_price': current_price,
-                'move_percent': move_percent,
-                'move_points': absolute_move,
-                'vix_regime': vix_regime,
-                'vix_value': vix_value,
-                'active_trades': 0,  # Will be updated per account
-                'symbol': market_data.symbol
-            }
-
-            # Send signal alert to each account
-            for account_name, account_mgr in self.account_managers.items():
-                try:
-                    # Update active trades count for this account
-                    signal_data['active_trades'] = len(account_mgr.trading_engine.active_trades)
-                    account_mgr.trading_engine._send_signal_alert(signal_data)
-                except Exception as e:
-                    print(f"❌ Error sending signal alert to {account_name}: {e}")
-
-            return Signal(
-                timestamp=current_time,
-                symbol=market_data.symbol,
-                price=current_price,
-                move_percent=move_percent,
-                move_points=absolute_move,
-                reference_price=reference_price,
-                expiration=current_time.strftime("%Y-%m-%d"),
-                vix_regime=vix_regime,
-                vix_value=vix_value
-            )
-
-        return None
+        return Signal(
+            timestamp=current_time,
+            symbol=market_data.symbol,
+            price=current_price,
+            move_percent=move_percent,
+            move_points=absolute_move,
+            reference_price=reference_price,
+            expiration=current_time.strftime("%Y-%m-%d"),
+            vix_regime=vix_regime,
+            vix_value=vix_value
+        )
 
     def _handle_entry(self, signal: Signal, market_data: MarketData):
         """
