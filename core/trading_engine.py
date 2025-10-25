@@ -406,20 +406,16 @@ class TradingEngine:
         # Add a list to store detailed signal/trade logs
         self.signal_trade_log = []
         self.trade_id_counter = 0  # Unique trade ID for each signal
-        
+
         # Initialize Telegram notifications
         self.telegram_notifier = None
-        self.account_holder_name = "Trading Account"
+        self.account_holder_name = config.get('ACCOUNT_NAME', 'Trading Account')
         self._init_telegram_notifications()
     
     def _init_telegram_notifications(self):
         """Initialize Telegram notifications if enabled"""
-        # In multi-account mode, telegram is handled by MultiAccountTelegramManager
-        # Individual TradingEngine should not have its own telegram
-        if self.mode in ['live', 'paper']:
-            return
-
-        # Only initialize for backtest mode if config is provided
+        # Initialize telegram for all modes when config is provided
+        # Each TradingEngine needs its own notifier for signal/entry/exit alerts
         try:
             if self.telegram_config and self.telegram_config.get('enabled'):
                 from utils.telegram_bot import TelegramNotifier, TelegramConfig
@@ -448,10 +444,12 @@ class TradingEngine:
                         'system_alerts': True
                     }
 
-                    self.log(f"[TELEGRAM] Initialized for backtest: {self.account_holder_name}")
+                    mode_label = self.mode.upper() if self.mode else 'UNKNOWN'
+                    self.log(f"[TELEGRAM] Initialized for {mode_label} mode: {self.account_holder_name}")
 
-                    # Send system start alert
-                    if self.telegram_settings['system_alerts']:
+                    # Only send system start alert for backtest mode
+                    # For live/paper, startup alert is handled by MultiAccountTelegramManager
+                    if self.mode == 'backtest' and self.telegram_settings['system_alerts']:
                         self._send_system_start_alert()
 
         except ImportError:
