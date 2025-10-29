@@ -1715,14 +1715,28 @@ class TradingEngine:
                         
                         self.log(f" LIMIT ORDER FILLED! {filled_position.type} Strike={filled_position.strike} @ ${status.get('avg_fill_price', filled_position.limit_price):.2f}")
                         self.log(f" Order Status: {status.get('status')} | Filled: {status.get('filled_quantity', 0)}/{filled_position.contracts}")
-                        
+
+                        # Parse actual fill time from Tradier's transaction_date
+                        fill_time = current_time  # Default to detection time
+                        if 'transaction_date' in status and status['transaction_date']:
+                            try:
+                                # Parse ISO 8601 format from Tradier (e.g., "2018-06-01T13:45:13.340Z")
+                                transaction_date_str = status['transaction_date'].replace('Z', '+00:00')
+                                fill_time = datetime.datetime.fromisoformat(transaction_date_str)
+                                # Convert to current timezone if needed
+                                if fill_time.tzinfo is not None and current_time.tzinfo is not None:
+                                    fill_time = fill_time.astimezone(current_time.tzinfo)
+                                self.log(f" Actual fill time from Tradier: {fill_time}")
+                            except Exception as e:
+                                self.log(f" Warning: Could not parse transaction_date '{status.get('transaction_date')}': {e}")
+
                         # Send Telegram limit order fill alert
                         fill_price = status.get('avg_fill_price', filled_position.limit_price)
                         profit_percent = ((fill_price - filled_position.entry_price) / filled_position.entry_price) * 100 if filled_position.entry_price > 0 else 0
                         trade_id = getattr(filled_position, 'trade_id', 'N/A')
-                        
+
                         limit_fill_data = {
-                            'fill_time': current_time,
+                            'fill_time': fill_time,
                             'option_type': filled_position.type,
                             'strike': filled_position.strike,
                             'fill_price': fill_price,
@@ -1731,7 +1745,7 @@ class TradingEngine:
                             'filled_position': filled_position,
                             'order_status': status,
                             'filled_quantity': status.get('filled_quantity', 0),
-                            'timing_status': self.get_market_timing_status(current_time)
+                            'timing_status': self.get_market_timing_status(fill_time)
                         }
                         self._send_limit_hit_alert(limit_fill_data)
                         
@@ -1823,19 +1837,19 @@ class TradingEngine:
                                 self.log(f" WARNING: Position {filled_position.type} Strike={filled_position.strike} has no trade_id, using fallback")
                                 trade_id = trade_index + 1
                             entry_time = self.trade_entry_times[trade_index] if trade_index is not None and trade_index < len(self.trade_entry_times) else current_time
-                            holding_time_minutes = (current_time - entry_time).total_seconds() / 60
+                            holding_time_minutes = (fill_time - entry_time).total_seconds() / 60
                             holding_time = f"{holding_time_minutes:.1f} minutes"
-                            
+
                             # Calculate win rate (handle None PnL values)
                             # Use actual completed trades, not just entries
                             completed_trades = [entry for entry in self.signal_trade_log if entry.get('pnl') is not None]
                             total_completed_trades = len(completed_trades)
                             wins = sum(1 for entry in completed_trades if entry.get('pnl', 0) > 0)
                             win_rate = (wins / total_completed_trades * 100) if total_completed_trades > 0 else 0.0
-                            
+
                             exit_data = {
                                 'trade_id': trade_id,
-                                'exit_time': current_time,
+                                'exit_time': fill_time,
                                 'holding_time': holding_time,
                                 'positions': self._positions_to_dict(trade_positions),
                                 'exit_reason': 'Limit Order Filled',
@@ -1852,7 +1866,7 @@ class TradingEngine:
                                 'total_pnl': self.total_pnl,
                                 'filled_position': filled_position,
                                 'fill_price': status.get('avg_fill_price', filled_position.limit_price),
-                                'timing_status': self.get_market_timing_status(current_time)
+                                'timing_status': self.get_market_timing_status(fill_time)
                             }
                             self._send_exit_alert(exit_data)
                             

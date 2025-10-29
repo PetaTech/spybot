@@ -285,11 +285,11 @@ def place_limit_order(option_type: str, strike: float, contracts: int,
 def get_order_status(order_id: str) -> Dict:
     """Get order status by order ID"""
     api = get_api_instance()
-    
+
     try:
         result = api.request(f"/accounts/{api.account_id}/orders/{order_id}")
         order = result.get("order", {})
-        
+
         status_info = {
             'id': order.get('id', 'N/A'),
             'status': order.get('status', 'unknown'),
@@ -300,9 +300,11 @@ def get_order_status(order_id: str) -> Dict:
             'symbol': order.get('option_symbol', order.get('symbol', 'N/A')),
             'side': order.get('side', 'N/A'),
             'price': float(order.get('price', 0.0)),
-            'type': order.get('type', 'N/A')
+            'type': order.get('type', 'N/A'),
+            'transaction_date': order.get('transaction_date'),  # Date the order was last updated/filled
+            'create_date': order.get('create_date')  # Date the order was created
         }
-        
+
         return status_info
     except Exception as e:
         print(f"[ERROR] Failed to get order status for {order_id}: {str(e)}")
